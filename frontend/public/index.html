@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Name Anagrams</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo-area">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 8v8"></path>
+          <path d="M8 12h8"></path>
+        </svg>
+        <span class="logo-text">Anagram OS</span>
+      </div>
+
+      <nav class="nav-section">
+        <a href="#" class="nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="icon-sm"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          Name Generator
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="top-bar">
+        <div class="top-bar-left">
+          <span class="page-title">Name Anagram Dashboard</span>
+        </div>
+      </header>
+
+      <div class="dashboard-content">
+        <!-- Metrics Cards -->
+        <div class="metrics-grid">
+          <div class="card metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Database Status</span>
+              <span class="badge badge-green">Connected</span>
+            </div>
+            <div class="metric-value">Online</div>
+            <div class="metric-footer">PostgreSQL running</div>
+          </div>
+          
+          <div class="card metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Last Searched Name</span>
+            </div>
+            <div class="metric-value" id="metric-last-word">-</div>
+            <div class="metric-footer">Awaiting input</div>
+          </div>
+
+          <div class="card metric-card">
+            <div class="metric-header">
+              <span class="metric-label">Anagrams Found</span>
+            </div>
+            <div class="metric-value" id="metric-count">0</div>
+            <div class="metric-footer" id="metric-status">Ready to search</div>
+          </div>
+        </div>
+
+             <!-- Main Workspace -->
+        <div class="workspace-grid">
+          
+          <!-- Left Card: Search -->
+          <div class="card workspace-card">
+            <div class="card-header">
+              <h2>Find Name Anagrams</h2>
+              <p>Enter a name to discover valid anagrams.</p>
+            </div>
+            
+            <form id="search-form" class="search-form">
+              <input id="word-input" type="text" placeholder="e.g. maria, maria elena, ștefan…" required autocomplete="off" />
+              <button type="submit" class="btn-primary">Search</button>
+            </form>
+
+            <div style="margin-bottom: 1rem;">
+              <button type="button" id="random-btn" class="btn-secondary">🎲 Surprise Me (Random Name)</button>
+            </div>
+
+            <div id="status" class="status-text"></div>
+            
+            <div id="results" class="results-container">
+              <!-- Results injected here -->
+            </div>
+          </div>
+
+          <!-- Right Card: Add Word -->
+          <div class="card workspace-card">
+            <div class="card-header">
+              <h2>Add Name to Dictionary</h2>
+              <p>Expand the database with new names.</p>
+            </div>
+
+            <form id="add-form" class="search-form">
+              <input id="new-word" type="text" placeholder="New name..." required autocomplete="off" />
+              <button type="submit" class="btn-secondary">Add</button>
+            </form>
+            
+            <div id="add-status" class="status-text"></div>
+          </div>
+
+        </div> <!-- 👈 This closes the workspace-grid -->
+
+        <!-- Dictionary Viewer (Full width, below the grid) -->
+        <div class="card workspace-card" style="margin-top: 1rem;">
+          <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <h2>Dictionary</h2>
+              <p>Names currently stored in the database.</p>
+            </div>
+            <button type="button" id="refresh-dict-btn" class="btn-secondary">↻ Refresh</button>
+          </div>
+          <div id="dictionary-list" class="dictionary-list">
+            <span class="empty-state">Loading…</span>
+          </div>
+        </div>
+
+      </div> <!-- This closes the dashboard-content -->
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
