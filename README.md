@@ -482,7 +482,7 @@ Or add `--no-cli-pager` to each command.
 
 ---
 
-## Lessons Learned — The Bugs We Fixed
+## Lessons Learned
 
 Every one of these actually happened during this project. They're documented so future-you (or a teammate) doesn't repeat the debugging loop.
 
