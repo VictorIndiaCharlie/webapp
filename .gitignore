@@ -1,6 +1,45 @@
+# ─── Node.js ────────────────────────────────────────────
 node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ─── Python ─────────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
 .venv/
+venv/
+*.egg-info/
+
+# ─── Environment & secrets ──────────────────────────────
 .env
+.env.local
+*.pem
+*.key
+
+# ─── Terraform ──────────────────────────────────────────
+# State files contain the Postgres password in plaintext!
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+*.tfstate.bak
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# ─── Docker / build artifacts ───────────────────────────
+*.tar.gz
+
+# ─── OS / Editor ────────────────────────────────────────
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
