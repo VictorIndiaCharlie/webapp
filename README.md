@@ -53,10 +53,9 @@ Input: `maria`
   "sub_anagrams": [
     {"word": "aim", "invented": false},
     {"word": "air", "invented": false},
-    {"word": "arm", "invented": false},
-    ...
+    {"word": "arm", "invented": false}
   ],
-  "phrases": [["aim", "ram"], ["air", "am"], ...],
+  "phrases": [["aim", "ram"], ["air", "am"]],
   "stats": {
     "exact_count": 3,
     "sub_count": 47,
@@ -66,7 +65,7 @@ Input: `maria`
   }
 }
 
-#Architecture
+### Architecture
 
                           Internet
                              │
