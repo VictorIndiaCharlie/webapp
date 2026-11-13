@@ -7,7 +7,5 @@ variable "backend_sg_id"         { type = string }
 variable "db_sg_id"              { type = string }
 variable "instance_profile_name" { type = string }
 variable "artifact_bucket_name"  { type = string }
-variable "postgres_password" {
-  type      = string
-  sensitive = true
-}
+variable "postgres_password"     { type = string }
+variable "ecr_registry"          { type = string } # <-- NEW

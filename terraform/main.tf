@@ -10,10 +10,51 @@ module "iam" {
 }
 
 module "artifact" {
-  source           = "./modules/artifact"
-  project_name     = var.project_name
-  ec2_role_id      = module.iam.ec2_role_id
-  app_tarball_path = var.app_tarball_path
+  source       = "./modules/artifact"
+  project_name = var.project_name
+  ec2_role_id  = module.iam.ec2_role_id
+}
+
+module "ecr" {
+  source     = "./modules/ecr"
+  aws_region = var.aws_region
+}
+
+# ==============================================================================
+# AUTOMATED BUILD & PUSH
+# This runs your shell commands locally when you run `terraform apply`
+# ==============================================================================
+resource "null_resource" "build_and_push" {
+  # This forces the build to run on every apply, but Docker caching keeps it fast
+  triggers = {
+    always_run = timestamp()
+  }
+
+  provisioner "local-exec" {
+    working_dir = "${path.module}/.."
+    command     = <<EOT
+      echo "▶ 1. Creating app tarball..."
+      tar --exclude='.git' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='terraform' --exclude='.terraform' --exclude='terraform.tfstate*' --exclude='shell' -czf /tmp/anagram-app.tar.gz -C . .
+
+      echo "▶ 2. Uploading tarball to S3..."
+      aws s3 cp /tmp/anagram-app.tar.gz s3://${module.artifact.bucket_name}/anagram-app.tar.gz --region ${var.aws_region}
+
+      echo "▶ 3. Logging into ECR..."
+      aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${module.ecr.registry_url}
+
+      echo "▶ 4. Building images locally..."
+      docker build -t ${module.ecr.registry_url}/anagram-backend:latest ./backend
+      docker build -t ${module.ecr.registry_url}/anagram-frontend:latest ./frontend
+      docker build -t ${module.ecr.registry_url}/anagram-nginx:latest ./nginx
+
+      echo "▶ 5. Pushing images to ECR..."
+      docker push ${module.ecr.registry_url}/anagram-backend:latest
+      docker push ${module.ecr.registry_url}/anagram-frontend:latest
+      docker push ${module.ecr.registry_url}/anagram-nginx:latest
+    EOT
+  }
+
+  depends_on = [module.artifact, module.ecr]
 }
 
 module "ec2" {
@@ -28,8 +69,10 @@ module "ec2" {
   instance_profile_name = module.iam.instance_profile_name
   artifact_bucket_name  = module.artifact.bucket_name
   postgres_password     = var.postgres_password
+  ecr_registry          = module.ecr.registry_url
 
-  depends_on = [module.artifact]
+  # CRITICAL: Wait for the null_resource to finish building/pushing before booting EC2s
+  depends_on = [null_resource.build_and_push]
 }
 
 module "alb" {

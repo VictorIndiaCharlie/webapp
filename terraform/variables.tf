@@ -10,12 +10,6 @@ variable "project_name" {
   default     = "anagram"
 }
 
-variable "app_tarball_path" {
-  description = "Local path to the app tarball produced by build.sh"
-  type        = string
-  default     = "/tmp/anagram-app.tar.gz"
-}
-
 variable "postgres_password" {
   description = "Postgres password used by all tiers"
   type        = string

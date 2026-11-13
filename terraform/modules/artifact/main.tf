@@ -2,7 +2,7 @@ data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "artifacts" {
   bucket        = "${var.project_name}-artifacts-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true # so `terraform destroy` cleans up tarballs
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_versioning" "artifacts" {
@@ -27,16 +27,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
       sse_algorithm = "AES256"
     }
   }
-}
-
-# Upload the app tarball as part of `terraform apply`.
-# The etag forces re-upload when the tarball changes.
-resource "aws_s3_object" "app_tarball" {
-  bucket = aws_s3_bucket.artifacts.id
-  key    = "anagram-app.tar.gz"
-  source = var.app_tarball_path
-  etag   = filemd5(var.app_tarball_path)
-  content_type = "application/gzip"
 }
 
 # Least-privilege read policy attached to the shared EC2 role

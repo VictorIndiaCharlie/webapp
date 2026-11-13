@@ -8,37 +8,36 @@ data "aws_ami" "amazon_linux_2023" {
 }
 
 resource "aws_instance" "db" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = "t3.micro"
-  subnet_id              = var.private_subnet_ids[0]
-  vpc_security_group_ids = [var.db_sg_id]
-  iam_instance_profile   = var.instance_profile_name
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = "t3.micro"
+  subnet_id                   = var.private_subnet_ids[0]
+  vpc_security_group_ids      = [var.db_sg_id]
+  iam_instance_profile        = var.instance_profile_name
+  user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/db.sh.tpl", {
     artifact_bucket   = var.artifact_bucket_name
     aws_region        = var.aws_region
-    postgres_password = var.postgres_password          
-    user_data_replace_on_change = true                
+    postgres_password = var.postgres_password
   })
-
-                 
 
   tags = { Name = "${var.project_name}-db" }
 }
 
 resource "aws_instance" "backend" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = "t3.micro"
-  subnet_id              = var.private_subnet_ids[1]
-  vpc_security_group_ids = [var.backend_sg_id]
-  iam_instance_profile   = var.instance_profile_name
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = "t3.micro"
+  subnet_id                   = var.private_subnet_ids[1]
+  vpc_security_group_ids      = [var.backend_sg_id]
+  iam_instance_profile        = var.instance_profile_name
+  user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/backend.sh.tpl", {
-    artifact_bucket    = var.artifact_bucket_name
-    aws_region         = var.aws_region
-    db_private_ip      = aws_instance.db.private_ip
-    postgres_password  = var.postgres_password
-    user_data_replace_on_change = true
+    artifact_bucket   = var.artifact_bucket_name
+    aws_region        = var.aws_region
+    db_private_ip     = aws_instance.db.private_ip
+    ecr_registry      = var.ecr_registry # <-- NEW
+    postgres_password = var.postgres_password
   })
 
   depends_on = [aws_instance.db]
@@ -46,16 +45,17 @@ resource "aws_instance" "backend" {
 }
 
 resource "aws_instance" "frontend" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = "t3.micro"
-  subnet_id              = var.private_subnet_ids[0]
-  vpc_security_group_ids = [var.frontend_sg_id]
-  iam_instance_profile   = var.instance_profile_name
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = "t3.micro"
+  subnet_id                   = var.private_subnet_ids[0]
+  vpc_security_group_ids      = [var.frontend_sg_id]
+  iam_instance_profile        = var.instance_profile_name
   user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/frontend.sh.tpl", {
-    artifact_bucket   = var.artifact_bucket_name
-    aws_region        = var.aws_region
+    artifact_bucket    = var.artifact_bucket_name
+    aws_region         = var.aws_region
+    ecr_registry       = var.ecr_registry # <-- NEW
     backend_private_ip = aws_instance.backend.private_ip
   })
 

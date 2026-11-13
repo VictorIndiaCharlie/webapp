@@ -2,6 +2,7 @@
 set -euo pipefail
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
+# 1. Install Docker and Buildx
 dnf update -y
 dnf install -y docker git
 systemctl enable --now docker
@@ -12,21 +13,35 @@ curl -SL "https://github.com/docker/compose/releases/latest/download/docker-comp
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-# Install buildx (required by docker compose v5+)
 curl -SL "https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-amd64" \
   -o /usr/local/lib/docker/cli-plugins/docker-buildx
 chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
+# 2. Create configs directly (Quoted heredoc)
 mkdir -p /home/ec2-user/app
-aws s3 cp "s3://${artifact_bucket}/anagram-app.tar.gz" /tmp/app.tar.gz --region ${aws_region}
-tar -xzf /tmp/app.tar.gz -C /home/ec2-user/app
 cd /home/ec2-user/app
 
-# Point backend at the DB EC2 private IP (Docker Compose uses the host env)
-export POSTGRES_HOST="${db_private_ip}"
-export POSTGRES_PASSWORD="${postgres_password}"
+cat << 'COMPOSE' > docker-compose.yml
+services:
+  backend:
+    image: ${ecr_registry}/anagram-backend:latest
+    container_name: anagram_backend
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: ${db_private_ip}
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: anagrams
+      POSTGRES_USER: anagram
+      POSTGRES_PASSWORD: ${postgres_password}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+COMPOSE
 
-# Patch docker-compose so the backend container uses the DB's private IP
-sed -i "s|POSTGRES_HOST: db|POSTGRES_HOST: ${db_private_ip}|g" docker-compose.yml
-sed -i "s|POSTGRES_PASSWORD: .*|POSTGRES_PASSWORD: ${postgres_password}|g" docker-compose.yml
+# 3. Log into ECR and Start Backend
+aws ecr get-login-password --region ${aws_region} | docker login --username AWS --password-stdin ${ecr_registry}
 docker compose up -d --no-deps backend
