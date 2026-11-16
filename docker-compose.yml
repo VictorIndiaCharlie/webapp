@@ -19,7 +19,8 @@ services:
       retries: 10
 
   backend:
-    image: ${ECR_REGISTRY}/anagram-backend:latest  # <-- CHANGED FROM BUILD
+    build:
+      context: ./backend
     container_name: anagram_backend
     ports:
       - "8000:8000"
@@ -40,15 +41,20 @@ services:
       retries: 10
 
   frontend:
-    image: ${ECR_REGISTRY}/anagram-frontend:latest # <-- CHANGED FROM BUILD
+    build:
+      context: ./frontend
     container_name: anagram_frontend
     restart: unless-stopped
     environment:
       PORT: 3000
       BACKEND_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
 
   nginx:
-    image: ${ECR_REGISTRY}/anagram-nginx:latest    # <-- CHANGED FROM BUILD
+    build:
+      context: ./nginx
     container_name: anagram_nginx
     restart: unless-stopped
     ports:

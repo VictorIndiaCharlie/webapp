@@ -20,12 +20,9 @@ module "ecr" {
   aws_region = var.aws_region
 }
 
-# ==============================================================================
-# AUTOMATED BUILD & PUSH
-# This runs your shell commands locally when you run `terraform apply`
-# ==============================================================================
+
 resource "null_resource" "build_and_push" {
-  # This forces the build to run on every apply, but Docker caching keeps it fast
+ 
   triggers = {
     always_run = timestamp()
   }
@@ -71,7 +68,7 @@ module "ec2" {
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
 
-  # CRITICAL: Wait for the null_resource to finish building/pushing before booting EC2s
+  
   depends_on = [null_resource.build_and_push]
 }
 
@@ -82,4 +79,11 @@ module "alb" {
   public_subnet_ids    = module.network.public_subnet_ids
   alb_sg_id            = module.network.alb_sg_id
   frontend_instance_id = module.ec2.frontend_instance_id
+}
+
+module "monitoring" {
+  source         = "./modules/monitoring"
+  project_name   = var.project_name
+  alb_arn_suffix = module.alb.alb_arn_suffix # This output must be added
+  alert_email    = "your-email@example.com"  # Optional
 }
