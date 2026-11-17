@@ -1,10 +1,7 @@
 name: Deploy to AWS
 
 on:
-   workflow_dispatch:
-  #push:
-    #branches:
-      - #main
+  workflow_dispatch: # Manual trigger
 
 # Prevents two deployments from running at the same time
 concurrency:
@@ -31,9 +28,25 @@ jobs:
         with:
           terraform_version: 1.10.0
 
+      - name: Bootstrap S3 State Bucket
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET_NAME="anagram-tfstate-${ACCOUNT_ID}"
+          echo "Using state bucket: $BUCKET_NAME"
+          
+          # Create bucket if it doesn't exist
+          aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null || \
+            aws s3api create-bucket --bucket "$BUCKET_NAME" --region ${{ secrets.AWS_REGION }} --create-bucket-configuration LocationConstraint=${{ secrets.AWS_REGION }}
+          
+          # Enable versioning for safety
+          aws s3api put-bucket-versioning --bucket "$BUCKET_NAME" --versioning-configuration Status=Enabled
+          
+          # Save the bucket name for the next step
+          echo "STATE_BUCKET=$BUCKET_NAME" >> $GITHUB_ENV
+
       - name: Terraform Init
         working-directory: ./terraform
-        run: terraform init
+        run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
 
       - name: Terraform Apply
         working-directory: ./terraform
