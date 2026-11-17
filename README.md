@@ -1,14 +1,12 @@
 # Anagram Generator — Tier-3 Webapp on AWS
 
-A full-stack anagram discovery tool that turns names into exact anagrams, sub-anagrams, and multi-word phrases. It also features a custom Markov-chain engine that generates pronounceable "invented" words.
-
-The entire infrastructure, deployment pipeline, and serverless monitoring are fully automated using **Terraform**, **AWS ECR**, and **AWS Lambda**.
+A full-stack anagram discovery tool that turns names into exact anagrams, sub-anagrams, and multi-word phrases. It features a custom Markov-chain engine that generates pronounceable "invented" words, fully deployed with Terraform, Docker, and AWS ECR.
 
 ---
 
 ## Architecture
 
-The application is split into three distinct tiers, sitting behind an Application Load Balancer (ALB), with an event-driven serverless monitoring stack.
+The application uses a strict 3-tier architecture, sitting behind an Application Load Balancer (ALB), with an event-driven serverless monitoring stack.
 
 ```text
                           Internet
@@ -43,21 +41,12 @@ The application is split into three distinct tiers, sitting behind an Applicatio
               └──────────────────────────────┘
 ```
 
-### Serverless Monitoring Flow
-```text
-[ ALB: 5xx Errors ] ──> [ CloudWatch Alarm ] ──> [ SNS Topic ] ──> [ Lambda Function ]
-                                                                         │
-                                                             ┌───────────┴───────────┐
-                                                             ▼                       ▼
-                                                    [ CloudWatch Logs ]      [ Email Alert ]
-```
-
 ---
 
 ## Tech Stack
 
 - **Frontend:** Node.js + Express, Vanilla HTML/CSS/JS
-- **Backend:** Python 3.11 + FastAPI, `psycopg2`
+- **Backend:** Python 3.11 + FastAPI
 - **Database:** PostgreSQL 16 (Alpine)
 - **Proxy:** Nginx (Alpine)
 - **Infrastructure:** Terraform, AWS EC2, AWS ALB, AWS ECR, AWS S3
@@ -69,149 +58,101 @@ The application is split into three distinct tiers, sitting behind an Applicatio
 
 ```text
 anagram-generator/
-├── docker-compose.yml            # Local dev orchestration
+├── docker-compose.yml            # Local development orchestration
 ├── README.md
-├── .gitignore
 │
-├── .github/
-│   └── workflows/
-│       ├── deploy.yml            # Manual GitHub Actions deployment
-│       └── destroy.yml           # Manual teardown workflow
-│
-├── backend/
+├── backend/                      # Python FastAPI Application
 │   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── app.py                    # FastAPI server + search logic
-│   ├── inventor.py               # Markov chain pseudo-word generator
-│   └── wordlist.txt              # Common English words
+│   ├── app.py                    # Search logic
+│   └── inventor.py               # Markov chain generator
 │
-├── frontend/
+├── frontend/                     # Node.js UI
 │   ├── Dockerfile
-│   ├── package.json
-│   ├── server.js                 # Express static server
-│   └── public/                   # Dashboard UI (HTML/CSS/JS)
+│   └── public/                   # HTML/CSS/JS Dashboard
 │
 ├── db/
-│   └── init.sql                  # Schema + seeded names
+│   └── init.sql                  # Database schema & seed data
 │
 ├── nginx/
 │   ├── Dockerfile
 │   └── nginx.conf                # Proxy configuration
 │
-└── terraform/
-    ├── main.tf                   # Root config + Auto-build null_resource
-    ├── variables.tf
-    ├── outputs.tf
+└── terraform/                    # AWS Infrastructure
+    ├── main.tf                   # Root config + Automated Docker build
     ├── providers.tf
     └── modules/
         ├── network/              # VPC, Subnets, Security Groups
-        ├── iam/                  # EC2 Roles, SSM, ECR Read-Only
-        ├── artifact/             # S3 Bucket for configs
-        ├── ecr/                  # ECR Repositories
+        ├── iam/                  # EC2 Roles & Permissions
+        ├── ecr/                  # Container Registries
         ├── ec2/                  # 3 Instances + user_data scripts
-        ├── alb/                  # Load Balancer & Target Group
-        └── monitoring/           # CloudWatch Alarm, SNS, Lambda
+        ├── alb/                  # Load Balancer
+        └── monitoring/           # Lambda, SNS, CloudWatch
 ```
 
 ---
 
-## How the App Runs (Docker & ECR)
+## 🚀 How to Deploy Locally
 
-We use a **Build Once, Run Anywhere** architecture.
-
-1. **Terraform builds locally:** During `terraform apply` (or GitHub Actions), a `null_resource` uses the host Docker daemon to build the `backend`, `frontend`, and `nginx` images.
-2. **Push to ECR:** The images are immediately pushed to AWS Elastic Container Registry (ECR).
-3. **EC2 Pulls the Images:** The EC2 instances no longer build code. When they boot, they authenticate to ECR and pull the pre-built images. This reduces boot time from ~8 minutes to ~45 seconds.
-
-### The EC2 `user_data` Scripts
-To ensure 100% reliability, the `user_data` scripts don't rely on extracting tarballs. They write the required configuration files (`docker-compose.yml` and `nginx.conf`) directly to disk, substituting the correct database IP and Backend IP before starting the containers.
-
----
-
-## Terraform Configuration
-
-The infrastructure is fully modularized. 
-
-### 1. The Automated Build Flow
-The root `main.tf` contains a `null_resource` that intercepts the deployment to build and push images before EC2s boot:
-```hcl
-resource "null_resource" "build_and_push" {
-  triggers = { always_run = timestamp() }
-  provisioner "local-exec" {
-    working_dir = "${path.module}/.."
-    command     = <<EOT
-      # Build, push to ECR, and upload configs to S3
-    EOT
-  }
-}
-```
-
-### 2. Serverless Monitoring Module
-The `modules/monitoring` module provides an event-driven alerting system:
-- **CloudWatch Alarm:** Watches the ALB for `HTTPCode_Target_5XX_Count > 5` over a 5-minute period.
-- **SNS Topic:** Receives the alarm state change and fans it out.
-- **Lambda Function (Python):** Triggered by SNS, it parses the alarm payload and logs it to CloudWatch. It is structured to easily be extended for auto-remediation (e.g., restarting a service via SSM).
-
-### 3. IAM Least Privilege
-The EC2 instances are governed by a single IAM role that attaches:
-- `AmazonSSMManagedInstanceCore` (for secure, keyless terminal access)
-- `AmazonEC2ContainerRegistryReadOnly` (to pull images)
-- A custom inline policy allowing `s3:GetObject` on the specific artifact bucket.
-
----
-
-## How to Deploy
-
-### Prerequisites
-- Terraform >= 1.10.0
-- AWS CLI configured (`aws configure`)
-- Docker running locally
-- GitHub repository with `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` secrets configured.
-
-### One-Command Deployment (GitHub Actions)
-Deployment is triggered manually via GitHub Actions.
-1. Go to your repository -> **Actions** tab.
-2. Select **Deploy to AWS** on the left.
-3. Click **Run workflow**.
-4. *Alternatively, run `terraform apply -auto-approve` locally from the `terraform/` directory.*
-
-Terraform will:
-1. Create the VPC, IAM roles, S3 bucket, ECR repositories, and monitoring resources.
-2. Run local `docker build` and `docker push` commands.
-3. Spin up the EC2 instances, which will pull the images and start the app.
-
-### Accessing the App
-Retrieve the ALB URL from Terraform outputs:
-```bash
-terraform output -raw alb_dns_name
-```
-Open that URL in your browser (ensure you use `http://`, not `https://`).
-
-### Testing the Monitoring
-You can manually trigger the CloudWatch Alarm to verify the Lambda function:
-```bash
-# Force the alarm into ALARM state
-aws cloudwatch set-alarm-state \
-  --alarm-name anagram-alb-5xx-errors \
-  --state-value ALARM \
-  --state-reason "Manual test of Lambda integration"
-
-# View the Lambda logs
-aws logs tail /aws/lambda/anagram-monitoring-handler --follow
-```
-
----
-
-## Local Development
-
-To run the stack locally for testing:
+You only need Docker and Docker Compose installed.
 
 ```bash
-# Build and start everything
+# 1. Build and start the containers
 docker compose up --build -d
 
-# The app will be available at http://localhost:8080
-# Tear down
+# 2. Access the app
+# Open http://localhost:8080 in your browser
+
+# 3. Tear down
 docker compose down -v
 ```
-*(Note: The local `docker-compose.yml` uses `build:` directives to compile the code locally, bypassing the need for AWS ECR credentials).*
+
+---
+
+## ☁️ How to Deploy in AWS (Quick Start)
+
+You can clone this repository and deploy the entire infrastructure into your own AWS account in minutes.
+
+**Prerequisites:**
+- Terraform installed
+- AWS CLI configured (`aws configure`) with AdministratorAccess
+- Docker running locally
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/VictorIndiaCharlie/webapp.git
+cd webapp/terraform
+
+# 2. Initialize and Deploy
+terraform init
+terraform apply -auto-approve
+
+# 3. Get the App URL
+terraform output -raw alb_dns_name
+```
+*(Note: Ensure you use `http://` and not `https://` when opening the URL).*
+
+---
+
+## ⚙️ How it Works (The DevOps Pipeline)
+
+1. **The Build Process:** When `terraform apply` runs, a `null_resource` executes `docker build` on your local machine for the backend, frontend, and Nginx. It then pushes these images to **AWS ECR** (Elastic Container Registry).
+2. **The 3-Tier Setup:** 
+   - Terraform spins up a **VPC** with public and private subnets.
+   - Three EC2 instances launch in private subnets.
+   - The instances run `user_data` scripts that authenticate to ECR, pull the pre-built images, and start the containers via Docker Compose.
+3. **The Request Flow:** 
+   - User hits the **ALB**.
+   - ALB forwards to the **Frontend EC2** (Nginx).
+   - Nginx serves static files and proxies `/api` requests to the **Backend EC2** (FastAPI).
+   - FastAPI queries the **DB EC2** (PostgreSQL) and returns the results.
+
+---
+
+## 🚨 Serverless Monitoring (Lambda)
+
+Instead of managing a heavy Prometheus/Grafana stack, this repo uses AWS-native serverless monitoring.
+
+**The Flow:**
+1. **CloudWatch Alarm:** Watches the ALB for `HTTPCode_Target_5XX_Count`. If there are more than 5 server errors in 5 minutes, it triggers.
+2. **Amazon SNS:** The alarm publishes a message to an SNS Topic.
+3. **AWS Lambda:** A Python Lambda function is subscribed to the topic. When triggered, it parses the alarm payload and logs the details to CloudWatch.
