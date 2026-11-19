@@ -23,9 +23,15 @@ jobs:
         with:
           terraform_version: 1.10.0
 
+      # --- THIS IS THE MISSING STEP ---
+      - name: Find S3 State Bucket
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "STATE_BUCKET=anagram-tfstate-${ACCOUNT_ID}" >> $GITHUB_ENV
+
       - name: Terraform Init
         working-directory: ./terraform
-        run: terraform init
+        run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
 
       - name: Terraform Destroy
         working-directory: ./terraform
