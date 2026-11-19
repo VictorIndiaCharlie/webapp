@@ -6,7 +6,6 @@ terraform {
     }
   }
   
-  # Only the bucket is left empty. GitHub Actions will inject it.
   backend "s3" {
     key    = "anagram-app/terraform.tfstate"
     region = "eu-central-1"
