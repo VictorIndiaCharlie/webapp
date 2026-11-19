@@ -1,0 +1,28 @@
+name: Continuous Integration (CI)
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  run-local-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Since your ci.sh checks for terraform, we must install it on the runner
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.0
+
+      # Make the script executable
+      - name: Make CI script executable
+        run: chmod +x ./shell/ci.sh
+
+      # Execute the exact same script you run locally!
+      - name: Run Local CI Pipeline
+        run: ./shell/ci.sh

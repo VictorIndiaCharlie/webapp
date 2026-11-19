@@ -22,7 +22,7 @@ module "ecr" {
 
 
 resource "null_resource" "build_and_push" {
- 
+
   triggers = {
     always_run = timestamp()
   }
@@ -68,7 +68,7 @@ module "ec2" {
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
 
-  
+
   depends_on = [null_resource.build_and_push]
 }
 
