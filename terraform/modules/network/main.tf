@@ -66,8 +66,8 @@ resource "aws_route_table_association" "private" {
 
 # --- Security Groups ---
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-alb-sg"
-  vpc_id      = aws_vpc.main.id
+  name   = "${var.project_name}-alb-sg"
+  vpc_id = aws_vpc.main.id
   ingress {
     from_port   = 80
     to_port     = 80
