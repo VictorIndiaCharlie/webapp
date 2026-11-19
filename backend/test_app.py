@@ -6,7 +6,7 @@ client = TestClient(app)
 
 # 1. Test the pure logic (No DB needed)
 def test_letter_pool():
-    assert letter_pool("Maria Elena") == "WRONG_ANSWER"
+    assert letter_pool("Maria Elena") == "mariaelena"
     assert letter_pool("Ștefan") == "stefan"
 
 def test_normalize_and_sort():
