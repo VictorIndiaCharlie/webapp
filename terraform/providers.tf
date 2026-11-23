@@ -4,6 +4,11 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    # ADD THIS BLOCK
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.11"
+    }
   }
 
   backend "s3" {

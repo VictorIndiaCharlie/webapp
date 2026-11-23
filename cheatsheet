@@ -1,0 +1,115 @@
+======================================================
+  DEV OPS PROJECT: ANAGRAM GENERATOR CHEAT SHEET
+======================================================
+
+-- PRE-REQUISITE (Run this in any new terminal) --
+export AWS_REGION=eu-central-1
+export AWS_PAGER=""
+
+
+======================================================
+  1. LOCAL DEVELOPMENT (DOCKER)
+======================================================
+# Start the app locally (accessible at http://localhost:8080)
+docker compose up --build -d
+
+# View the running containers
+docker ps
+
+# View logs if something crashes
+docker compose logs -f
+
+# Tear down the local environment
+docker compose down -v
+
+
+======================================================
+  2. LOCAL CI PIPELINE (SHELL SCRIPT)
+======================================================
+# Run the local CI (Linting, Terraform Fmt, Docker Build, Pytest)
+cd shell
+./ci.sh
+
+
+======================================================
+  3. GITHUB ACTIONS DEMO (CI & PR GATEKEEPER)
+======================================================
+# 1. Create and switch to the demo branch
+git checkout -b demo-ci-blocker
+
+# 2. Make a change (e.g., break a test in backend/test_app.py)
+# assert letter_pool("Maria Elena") == "WRONG_ANSWER"
+
+# 3. Push the broken code to GitHub
+git add .
+git commit -m "test: intentionally break unit test to test CI failure"
+git push origin demo-ci-blocker
+
+# 4. Go to GitHub UI -> Open Pull Request -> Watch CI Fail -> Merge button locks!
+# 5. Fix the test locally, then push the fix:
+git add .
+git commit -m "fix: resolve failing test"
+git push origin demo-ci-blocker
+# 6. Go to GitHub UI -> Watch CI Pass -> Click Merge!
+
+# If git push gets rejected (divergent branches), run:
+git pull origin demo-ci-blocker --no-rebase
+git push origin demo-ci-blocker
+
+
+======================================================
+  4. TERRAFORM (DEPLOYING TO AWS)
+======================================================
+# Initialize Terraform (dynamically finds your S3 state bucket)
+terraform init -reconfigure -backend-config="bucket=anagram-tfstate-$(aws sts get-caller-identity --query Account --output text)"
+
+# Preview the infrastructure changes
+terraform plan
+
+# Deploy the infrastructure and trigger the Docker Build/Push
+terraform apply -auto-approve
+
+# Get the public Application Load Balancer URL
+terraform output -raw alb_dns_name
+
+# DESTROY EVERYTHING (Save money after the demo!)
+terraform destroy -auto-approve
+
+
+======================================================
+  5. AWS MONITORING (CLOUDWATCH + LAMBDA)
+======================================================
+# 1. Open a SECOND terminal, set the region, and tail the Lambda logs:
+aws logs tail /aws/lambda/anagram-monitoring-handler --follow --region eu-central-1
+
+# 2. In your FIRST terminal, trigger a fake alarm to simulate 5xx errors:
+aws cloudwatch set-alarm-state --alarm-name anagram-alb-5xx-errors --state-value ALARM --state-reason "Demo: Simulating failure" --region eu-central-1
+
+# (Look at the second terminal to see the Python Lambda function execute!)
+
+# 3. Reset the alarm to OK state:
+aws cloudwatch set-alarm-state --alarm-name anagram-alb-5xx-errors --state-value OK --state-reason "Demo: Resetting" --region eu-central-1
+
+
+======================================================
+  6. AWS SSM (TROUBLESHOOTING EC2s)
+======================================================
+# Get the instance ID of the frontend server
+FRONTEND=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=anagram-frontend" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region eu-central-1)
+
+# Connect to the instance via AWS Systems Manager (No SSH keys needed!)
+aws ssm start-session --target $FRONTEND --region eu-central-1
+
+
+======================================================
+  7. GITHUB ACTIONS DEPLOYMENT (CD)
+======================================================
+# To trigger the actual deployment pipeline:
+# 1. Go to GitHub Repo -> Actions Tab
+# 2. Click "Deploy to AWS" on the left
+# 3. Click "Run workflow"
+
+# To trigger the teardown pipeline:
+# 1. Go to GitHub Repo -> Actions Tab
+# 2. Click "Destroy AWS Infrastructure" on the left
+# 3. Click "Run workflow"

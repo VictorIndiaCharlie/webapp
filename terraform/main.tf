@@ -54,6 +54,8 @@ resource "null_resource" "build_and_push" {
   depends_on = [module.artifact, module.ecr]
 }
 
+
+
 module "ec2" {
   source                = "./modules/ec2"
   project_name          = var.project_name
@@ -68,6 +70,7 @@ module "ec2" {
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
 
+  depends_on = [time_sleep.wait_for_db]
 
   depends_on = [null_resource.build_and_push]
 }
