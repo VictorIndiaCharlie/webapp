@@ -10,7 +10,7 @@ terraform {
       version = "~> 0.11"
     }
   }
-  
+
   backend "s3" {
     key    = "anagram-app/terraform.tfstate"
     region = "eu-central-1"
