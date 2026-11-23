@@ -42,6 +42,15 @@ services:
       retries: 10
 COMPOSE
 
+# Wait for the Database to be ready
+DB_IP=${db_private_ip}
+echo "Waiting for Database at $DB_IP:5432..."
+while ! timeout 1 bash -c "cat < /dev/null > /dev/tcp/$DB_IP/5432" 2>/dev/null; do
+  echo "Database not ready yet. Retrying in 5 seconds..."
+  sleep 5
+done
+echo "Database is ready! Starting Backend..."
+
 # 3. Log into ECR and Start Backend
 aws ecr get-login-password --region ${aws_region} | docker login --username AWS --password-stdin ${ecr_registry}
 docker compose up -d --no-deps backend
