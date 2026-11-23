@@ -70,11 +70,8 @@ module "ec2" {
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
 
-<<<<<<< HEAD
   depends_on = [time_sleep.wait_for_db]
-=======
 
->>>>>>> 80fc54ada2628394a7d33169622f6a4e33ca0d74
   depends_on = [null_resource.build_and_push]
 }
 
