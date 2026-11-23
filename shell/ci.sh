@@ -1,9 +1,9 @@
 #!/bin/bash
-set -e # Exit immediately if any command fails
+set -euo pipefail
 
 # Auto-navigate to the project root
 if [ -d "backend" ]; then
-  : # already in root
+  :
 elif [ -d "../backend" ]; then
   cd ..
 else
@@ -15,11 +15,19 @@ echo "======================================"
 echo " 🚀 STARTING LOCAL CI PIPELINE"
 echo "======================================"
 
-# 1. Code Linting
-echo -e "\n▶ 1. Code Linting..."
-echo "   - Linting Backend (flake8)..."
+# 1. Code Linting & Auto-Formatting
+echo -e "\n▶ 1. Code Formatting & Linting..."
+
+echo "   - Building CI Docker image (to ensure tools are present)..."
 docker build -q -t anagram-backend-ci ./backend > /dev/null
-docker run --rm anagram-backend-ci flake8 --ignore=E231,E501,E302 app.py
+
+echo "   - Auto-formatting with black..."
+# We mount the volume so black rewrites the files on your local machine
+docker run --rm -v "$(pwd)/backend:/app" anagram-backend-ci black app.py inventor.py
+
+echo "   - Linting Backend (flake8)..."
+# Ignore E203 and W503 because black requires them to be ignored
+docker run --rm -v "$(pwd)/backend:/app" anagram-backend-ci flake8 --max-line-length=88 --extend-ignore=E203,W503 app.py inventor.py
 
 echo "   - Formatting Terraform..."
 if command -v terraform &> /dev/null; then
@@ -42,7 +50,6 @@ echo "   ✅ Docker images built successfully."
 # 3. Unit Testing
 echo -e "\n▶ 3. Unit Testing..."
 echo "   - Running Backend Tests..."
-# NEW: Added -v "$(pwd)/backend:/app" to mount the test file into the container
 docker run --rm -v "$(pwd)/backend:/app" anagram-backend-ci pytest test_app.py -v
 
 echo -e "\n======================================"

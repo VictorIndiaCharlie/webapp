@@ -1,6 +1,9 @@
 import os
 import re
 import time
+import sys
+import random
+import threading
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import lru_cache
@@ -24,34 +27,41 @@ DB_CONFIG = {
 }
 WORDLIST_PATH = os.getenv("WORDLIST_PATH", "/app/wordlist.txt")
 
-CORPUS_PER_LENGTH = {2: 400, 3: 1500, 4: 3000, 5: 3500, 6: 2500}
+CORPUS_PER_LENGTH = {2: 500, 3: 1000, 4: 2000, 5: 2000, 6: 1000}
 
-SEED_NAMES = [
-    "andrei","andreea","alexandru","maria","elena","ioana","mihai","gabriel",
-    "ana","cristian","daniel","luca","stefan","ionut","alina","alexandra",
-    "bogdan","catalin","dragos","florin","george","ion","laurentiu","marius",
-    "nicolae","oana","paul","radu","sorin","tudor","vasile","dumitru",
-    "gheorghe","constantin","adrian","cornel","vlad",
-    "matteo","sophie","luis","pierre","giulia","hans","klaus","nikola","olga",
-    "sven","ivan","lars","emma","olivia","liam","noah","lucas","sofia","alice",
-    "hugo","arthur","leo","adam","david","karl","franz","giovanni","isabella",
-    "charlotte","amelia","mia","leon","felix","maximilian","anna","lena","nina",
-    "clara","laura","julia","sara","elisa","martina","francesca","chiara",
-]
 
 # ---------------------------------------------------------------- helpers
 def strip_diacritics(s: str) -> str:
-    """Basic mapping for Romanian/European accents so 'Ștefan' → 'stefan'."""
     table = {
-        "ă":"a","â":"a","î":"i","ș":"s","ş":"s","ț":"t","ţ":"t",
-        "á":"a","à":"a","ä":"a","é":"e","è":"e","ë":"e","í":"i","ì":"i",
-        "ï":"i","ó":"o","ò":"o","ö":"o","ú":"u","ù":"u","ü":"u","ç":"c","ñ":"n",
+        "ă": "a",
+        "â": "a",
+        "î": "i",
+        "ș": "s",
+        "ş": "s",
+        "ț": "t",
+        "ţ": "t",
+        "á": "a",
+        "à": "a",
+        "ä": "a",
+        "é": "e",
+        "è": "e",
+        "ë": "e",
+        "í": "i",
+        "ì": "i",
+        "ï": "i",
+        "ó": "o",
+        "ò": "o",
+        "ö": "o",
+        "ú": "u",
+        "ù": "u",
+        "ü": "u",
+        "ç": "c",
+        "ñ": "n",
     }
     return "".join(table.get(c, c) for c in s.lower())
 
 
 def letter_pool(raw: str) -> str:
-    """Return just a-z letters — spaces and punctuation stripped, accents normalized."""
     s = strip_diacritics(raw)
     return re.sub(r"[^a-z]", "", s)
 
@@ -89,78 +99,54 @@ EXACT_MAP: Dict[str, List[str]] = defaultdict(list)
 INVENTED_MAP: Dict[str, List[str]] = defaultdict(list)
 ALL_KEYS_SORTED: List[str] = []
 INVENTED_SET: set = set()
+IS_LOADED = False
+INVENTOR: MarkovInventor = None
 
 
-@lru_cache(maxsize=4000)
+@lru_cache(maxsize=1000)
 def _find_all(input_key: str, input_len: int, max_words: int, invented: bool) -> dict:
     input_counts = to_counts(input_key)
     t0 = time.perf_counter()
 
-    # 1) Exact anagrams
     exact = list(EXACT_MAP.get(input_key, []))
     if invented:
         exact += list(INVENTED_MAP.get(input_key, []))
 
-    # 2) Sub-anagrams
-    sub_anagrams: List[str] = []
-    subset_keys: List[str] = []
+    sub_anagrams = []
+    subset_keys = []
     for key in ALL_KEYS_SORTED:
-        if len(key) >= input_len:
-            continue
-        if is_subset_key(key, input_counts):
+        if len(key) < input_len and is_subset_key(key, input_counts):
             subset_keys.append(key)
             sub_anagrams.extend(EXACT_MAP.get(key, []))
             if invented:
                 sub_anagrams.extend(INVENTED_MAP.get(key, []))
+
+    sub_anagrams = sorted(list(set(sub_anagrams)), key=lambda w: (-len(w), w))[:100]
     sub_anagrams.sort(key=lambda w: (len(w), w))
 
-    # 3) Phrases (real words only — invented would explode the search)
-    phrases: List[List[str]] = []
-    seen = set()
+    phrases = []
 
-    def add_phrase(words: List[str]):
-        canon = tuple(sorted(words))
-        if canon in seen:
+    def backtrack(start_idx, remaining_counts, current_words):
+        if sum(remaining_counts) == 0 and len(current_words) > 1:
+            phrases.append(list(current_words))
             return
-        seen.add(canon)
-        phrases.append(words)
+        if len(current_words) >= max_words:
+            return
 
-    if max_words >= 2:
-        for key1 in subset_keys:
-            if key1 not in EXACT_MAP:
-                continue
-            remaining = subtract_counts(input_counts, to_counts(key1))
-            rem_key = counts_key(remaining)
-            if not rem_key or rem_key not in EXACT_MAP or key1 > rem_key:
-                continue
-            for w1 in EXACT_MAP[key1]:
-                for w2 in EXACT_MAP[rem_key]:
-                    if key1 == rem_key and w1 > w2:
-                        continue
-                    add_phrase([w1, w2])
+        for i in range(start_idx, len(subset_keys)):
+            key = subset_keys[i]
+            if is_subset_key(key, remaining_counts):
+                new_counts = subtract_counts(remaining_counts, to_counts(key))
+                words = EXACT_MAP.get(key, [])
+                if invented:
+                    words += INVENTED_MAP.get(key, [])
 
-    if max_words >= 3:
-        for i, key1 in enumerate(subset_keys):
-            if key1 not in EXACT_MAP:
-                continue
-            c1 = to_counts(key1)
-            remaining1 = subtract_counts(input_counts, c1)
-            if sum(remaining1) < 2:
-                continue
-            for key2 in subset_keys[i:]:
-                if key1 >= key2 or key2 not in EXACT_MAP:
-                    continue
-                if not is_subset_key(key2, remaining1):
-                    continue
-                remaining2 = subtract_counts(remaining1, to_counts(key2))
-                rem2_key = counts_key(remaining2)
-                if not rem2_key or rem2_key not in EXACT_MAP or key2 > rem2_key:
-                    continue
-                for w1 in EXACT_MAP[key1]:
-                    for w2 in EXACT_MAP[key2]:
-                        for w3 in EXACT_MAP[rem2_key]:
-                            add_phrase([w1, w2, w3])
+                for word in words:
+                    current_words.append(word)
+                    backtrack(i, new_counts, current_words)
+                    current_words.pop()
 
+    backtrack(0, input_counts, [])
     phrases.sort(key=lambda p: (len(p), " ".join(p)))
     elapsed = (time.perf_counter() - t0) * 1000
 
@@ -172,7 +158,7 @@ def _find_all(input_key: str, input_len: int, max_words: int, invented: bool) ->
     }
 
 
-# ---------------------------------------------------------------- DB + startup
+# ---------------------------------------------------------------- DB
 @contextmanager
 def db_conn():
     conn = psycopg2.connect(**DB_CONFIG)
@@ -184,51 +170,49 @@ def db_conn():
 
 def ensure_schema():
     with db_conn() as conn, conn.cursor() as cur:
-        cur.execute("""
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS words (
                 id SERIAL PRIMARY KEY,
                 word VARCHAR(100) UNIQUE NOT NULL,
                 sorted_letters VARCHAR(100) NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_words_sorted_letters ON words (sorted_letters);")
-        cur.execute("SELECT COUNT(*) FROM words;")
-        if cur.fetchone()[0] == 0:
-            for w in SEED_NAMES:
-                cur.execute(
-                    "INSERT INTO words (word, sorted_letters) VALUES (%s, %s) ON CONFLICT DO NOTHING;",
-                    (w, normalize_and_sort(w)),
-                )
+        """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_words_sorted_letters "
+            "ON words (sorted_letters);"
+        )
         conn.commit()
 
 
-def load_wordlist_from_file() -> List[str]:
+def build_dictionaries():
+    global EXACT_MAP, INVENTED_MAP, ALL_KEYS_SORTED
+    global INVENTED_SET, IS_LOADED, INVENTOR
+    print("[init] Loading 2M word dictionary into memory...")
+    t0 = time.perf_counter()
+
     try:
         with open(WORDLIST_PATH, "r", encoding="utf-8") as f:
-            return [line.strip().lower() for line in f if line.strip()]
+            real_words = list(
+                set(
+                    sys.intern(line.strip().lower())
+                    for line in f
+                    if line.strip().isalpha()
+                )
+            )
     except FileNotFoundError:
-        print(f"[init] WARNING: {WORDLIST_PATH} missing")
-        return []
+        print(f"[init] WARNING: {WORDLIST_PATH} not found.")
+        return
 
+    random.seed(42)
+    training_sample = random.sample(real_words, min(50000, len(real_words)))
 
-def build_dictionaries():
-    global EXACT_MAP, INVENTED_MAP, ALL_KEYS_SORTED, INVENTED_SET
-    EXACT_MAP = defaultdict(list)
-    INVENTED_MAP = defaultdict(list)
-
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT word FROM words;")
-        db_words = [r[0] for r in cur.fetchall()]
-
-    file_words = load_wordlist_from_file()
-    real_words = set(w.lower() for w in db_words + file_words)
-    print(f"[init] Real dictionary: {len(real_words)} words")
-
-    t0 = time.perf_counter()
-    inventor = MarkovInventor(real_words)
-    invented = inventor.generate_corpus(CORPUS_PER_LENGTH, exclude=real_words)
-    print(f"[init] Invented {len(invented)} pseudo-words in {(time.perf_counter()-t0)*1000:.0f} ms")
+    print("[init] Training Markov inventor...")
+    INVENTOR = MarkovInventor(training_sample)
+    invented = INVENTOR.generate_corpus(CORPUS_PER_LENGTH, exclude=set(real_words))
+    print(f"[init] Generated {len(invented)} invented words.")
 
     for w in real_words:
         EXACT_MAP[normalize_and_sort(w)].append(w)
@@ -238,35 +222,39 @@ def build_dictionaries():
 
     all_keys = set(EXACT_MAP.keys()) | set(INVENTED_MAP.keys())
     ALL_KEYS_SORTED = sorted(all_keys, key=lambda k: (len(k), k))
-    print(f"[init] Buckets: {len(ALL_KEYS_SORTED)} "
-          f"({len(EXACT_MAP)} real, {len(INVENTED_MAP)} invented)")
+
+    elapsed = time.perf_counter() - t0
+    print(f"[init] Loaded {len(real_words)} real words in {elapsed:.1f}s")
+    IS_LOADED = True
 
 
 # ---------------------------------------------------------------- app
 app = FastAPI(title="Anagram Generator API", version="3.0.0")
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_credentials=False,
-    allow_methods=["*"], allow_headers=["*"],
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(exc)}"})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}"},
+    )
 
 
 @app.on_event("startup")
 def on_startup():
-    last_err = None
-    for _ in range(30):
+    for _ in range(10):
         try:
             ensure_schema()
-            build_dictionaries()
-            return
-        except Exception as exc:  # noqa: BLE001
-            last_err = exc
-            time.sleep(1)
-    print(f"[init] WARNING: failed after 30s: {last_err}")
+            break
+        except Exception:
+            time.sleep(2)
+
+    thread = threading.Thread(target=build_dictionaries)
+    thread.daemon = True
+    thread.start()
 
 
 class WordIn(BaseModel):
@@ -277,67 +265,67 @@ class WordIn(BaseModel):
     def _validate(cls, v: str) -> str:
         cleaned = letter_pool(v.strip())
         if not cleaned:
-            raise ValueError("word must contain at least one letter")
+            raise ValueError("word must contain letters")
         return cleaned
 
 
 @app.get("/health")
 def health():
+    if not IS_LOADED:
+        raise HTTPException(status_code=503, detail="Dictionary is still loading...")
     try:
         with db_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
         return {"status": "ok"}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise HTTPException(status_code=503, detail=f"db unreachable: {exc}") from exc
-
-
-def tag(w: str) -> dict:
-    return {"word": w, "invented": w in INVENTED_SET}
 
 
 @app.get("/api/anagrams")
 def get_anagrams(
     word: str = Query(..., min_length=1, max_length=60),
-    max_words: int = Query(2, ge=1, le=3),
-    invented: bool = Query(True, description="Include invented pseudo-words"),
+    max_words: int = Query(3, ge=1, le=5),
 ):
+    if not IS_LOADED:
+        raise HTTPException(status_code=503, detail="Dictionary is still loading.")
+
     raw = word.strip()
     pool = letter_pool(raw)
     if not pool:
-        raise HTTPException(status_code=400, detail="word must contain at least one letter")
-    if not EXACT_MAP:
-        raise HTTPException(status_code=503, detail="dictionary loading, retry in a moment")
+        raise HTTPException(status_code=400, detail="word must contain letters")
 
     input_key = "".join(sorted(pool))
-    result = _find_all(input_key, len(input_key), max_words, invented)
+    result = _find_all(input_key, len(input_key), max_words, invented=True)
 
-    filtered_exact = [w for w in result["exact"] if w != pool]
+    exact_list = [
+        {"word": w, "invented": w in INVENTED_SET} for w in result["exact"] if w != pool
+    ]
+
+    if INVENTOR and len(pool) <= 8:
+        existing_words = {w["word"] for w in exact_list}
+        on_the_fly = INVENTOR.generate_exact_anagrams(pool, count=10)
+
+        for w in on_the_fly:
+            if w not in existing_words and w != pool:
+                exact_list.append({"word": w, "invented": True})
 
     return {
         "input": raw,
-        "input_pool": pool,
-        "input_key": input_key,
-        "input_word_count": len(raw.split()),
-        "exact": [tag(w) for w in filtered_exact],
-        "sub_anagrams": [tag(w) for w in result["sub_anagrams"][:300]],
+        "exact": exact_list,
+        "sub_anagrams": [
+            {"word": w, "invented": w in INVENTED_SET} for w in result["sub_anagrams"]
+        ],
         "phrases": result["phrases"],
         "stats": {
-            "exact_count": len(filtered_exact),
+            "exact_count": len(exact_list),
             "sub_count": len(result["sub_anagrams"]),
             "phrase_count": len(result["phrases"]),
-            "total": len(filtered_exact) + len(result["sub_anagrams"]) + len(result["phrases"]),
+            "total": len(exact_list)
+            + len(result["sub_anagrams"])
+            + len(result["phrases"]),
             "time_ms": result["time_ms"],
-            "invented": invented,
         },
     }
-
-
-@app.get("/api/words/all")
-def list_all_words():
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT word FROM words ORDER BY word ASC;")
-        rows = [r[0] for r in cur.fetchall()]
-    return {"count": len(rows), "words": rows}
 
 
 @app.get("/api/words/random")
@@ -346,31 +334,23 @@ def random_word():
         cur.execute("SELECT word FROM words ORDER BY RANDOM() LIMIT 1")
         row = cur.fetchone()
     if row is None:
-        raise HTTPException(status_code=404, detail="dictionary is empty")
+        raise HTTPException(status_code=404, detail="dictionary empty")
     return {"word": row[0]}
 
 
 @app.post("/api/words", status_code=201)
 def add_word(payload: WordIn):
-    word = payload.word  # already sanitized by pydantic
+    word = payload.word
     key = normalize_and_sort(word)
-
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO words (word, sorted_letters) VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING word;",
+            "INSERT INTO words (word, sorted_letters) "
+            "VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING word;",
             (word, key),
         )
         inserted = cur.fetchone() is not None
         conn.commit()
-
-    if inserted:
-        EXACT_MAP[key].append(word)
-        if key not in ALL_KEYS_SORTED:
-            ALL_KEYS_SORTED.append(key)
-            ALL_KEYS_SORTED.sort(key=lambda k: (len(k), k))
-        _find_all.cache_clear()
-
     return {
         "word": word,
-        "message": None if inserted else "already exists in dictionary",
+        "message": None if inserted else "already exists",
     }
