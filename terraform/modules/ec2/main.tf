@@ -7,6 +7,7 @@ data "aws_ami" "amazon_linux_2023" {
   }
 }
 
+# 1. DATABASE INSTANCE
 resource "aws_instance" "db" {
   ami                         = data.aws_ami.amazon_linux_2023.id
   instance_type               = "t3.micro"
@@ -24,6 +25,13 @@ resource "aws_instance" "db" {
   tags = { Name = "${var.project_name}-db" }
 }
 
+# 2. THE SLEEP TIMER (Waits 2 mins for DB container to start)
+resource "time_sleep" "wait_for_db" {
+  depends_on      = [aws_instance.db]
+  create_duration = "120s"
+}
+
+# 3. BACKEND INSTANCE
 resource "aws_instance" "backend" {
   ami                         = data.aws_ami.amazon_linux_2023.id
   instance_type               = "t3.micro"
@@ -33,17 +41,18 @@ resource "aws_instance" "backend" {
   user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/backend.sh.tpl", {
-    artifact_bucket   = var.artifact_bucket_name
     aws_region        = var.aws_region
     db_private_ip     = aws_instance.db.private_ip
-    ecr_registry      = var.ecr_registry # <-- NEW
+    ecr_registry      = var.ecr_registry
     postgres_password = var.postgres_password
   })
 
-  depends_on = [aws_instance.db]
-  tags       = { Name = "${var.project_name}-backend" }
+  depends_on = [time_sleep.wait_for_db]
+  
+  tags = { Name = "${var.project_name}-backend" }
 }
 
+# 4. FRONTEND INSTANCE
 resource "aws_instance" "frontend" {
   ami                         = data.aws_ami.amazon_linux_2023.id
   instance_type               = "t3.micro"
@@ -53,12 +62,12 @@ resource "aws_instance" "frontend" {
   user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/frontend.sh.tpl", {
-    artifact_bucket    = var.artifact_bucket_name
     aws_region         = var.aws_region
-    ecr_registry       = var.ecr_registry # <-- NEW
+    ecr_registry       = var.ecr_registry
     backend_private_ip = aws_instance.backend.private_ip
   })
 
   depends_on = [aws_instance.backend]
-  tags       = { Name = "${var.project_name}-frontend" }
+  
+  tags = { Name = "${var.project_name}-frontend" }
 }
