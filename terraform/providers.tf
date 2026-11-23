@@ -8,7 +8,6 @@ terraform {
       source  = "hashicorp/time"
       version = "~> 0.11"
     }
-    # ADD THE DOCKER PROVIDER
     docker = {
       source  = "kreuzwerker/docker"
       version = "~> 3.0"

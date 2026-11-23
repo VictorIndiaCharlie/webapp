@@ -19,7 +19,7 @@ echo "======================================"
 echo -e "\n▶ 1. Code Linting..."
 echo "   - Linting Backend (flake8)..."
 docker build -q -t anagram-backend-ci ./backend > /dev/null
-docker run --rm anagram-backend-ci flake8 --ignore=E231,E501,E302 app.py
+docker run --rm anagram-backend-ci flake8 --ignore=E231,E501,E302 app.py inventor.py
 
 echo "   - Formatting Terraform..."
 if command -v terraform &> /dev/null; then

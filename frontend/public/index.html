@@ -78,10 +78,19 @@
               <p>Enter a name to discover valid anagrams.</p>
             </div>
             
-            <form id="search-form" class="search-form">
-              <input id="word-input" type="text" placeholder="e.g. maria, maria elena, ștefan…" required autocomplete="off" />
-              <button type="submit" class="btn-primary">Search</button>
-            </form>
+           <form id="search-form" class="search-form">
+  <input id="word-input" type="text" placeholder="e.g. Alexandru, maria elena..." required autocomplete="off" />
+  
+  <!-- Add the Max Words Dropdown -->
+  <select id="max-words" style="background: #18181b; color: white; border: 1px solid #27272a; padding: 0.75rem; border-radius: 8px; font-family: inherit; font-size: 0.9rem; outline: none; cursor: pointer;">
+    <option value="2">2 Words</option>
+    <option value="3" selected>3 Words</option>
+    <option value="4">4 Words</option>
+    <option value="5">5 Words</option>
+  </select>
+
+  <button type="submit" class="btn-primary">Search</button>
+</form>
 
             <div style="margin-bottom: 1rem;">
               <button type="button" id="random-btn" class="btn-secondary">🎲 Surprise Me (Random Name)</button>

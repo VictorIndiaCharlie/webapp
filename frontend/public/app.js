@@ -1,5 +1,6 @@
 const searchForm = document.getElementById("search-form");
 const wordInput  = document.getElementById("word-input");
+const maxWordsSelect = document.getElementById("max-words");
 const statusEl   = document.getElementById("status");
 const resultsEl  = document.getElementById("results");
 const randomBtn  = document.getElementById("random-btn");
@@ -35,12 +36,7 @@ function wordTag(w) {
 }
 
 function renderSection(title, items, emptyText, renderFn) {
-  if (!items.length) {
-    return `<div class="result-section">
-      <div class="result-header"><h3>${title}</h3><span class="count">0</span></div>
-      <p class="empty-state">${emptyText}</p>
-    </div>`;
-  }
+  if (!items.length) return "";
   const body = items.map(renderFn).join("");
   return `<div class="result-section">
     <div class="result-header"><h3>${title}</h3><span class="count">${items.length}</span></div>
@@ -50,34 +46,34 @@ function renderSection(title, items, emptyText, renderFn) {
 
 async function performSearch(word) {
   // RESET the counter
-  statusEl.textContent = "Searching…";
+  statusEl.textContent = "Searching database...";
   resultsEl.innerHTML  = "";
-  metricLastWord.textContent = word;          // preserves spaces as typed
-  metricCount.textContent    = "0";           // reset to zero
-  metricStatus.textContent   = "Searching…";
+  metricLastWord.textContent = word;
+  metricCount.textContent    = "0";
+  metricStatus.textContent   = "Searching...";
 
   try {
-    const data = await safeFetch(
-      `/api/anagrams?word=${encodeURIComponent(word)}&max_words=2&invented=true`
-    );
+    const maxWords = maxWordsSelect.value;
+    const data = await safeFetch(`/api/anagrams?word=${encodeURIComponent(word)}&max_words=${maxWords}`);
     const { exact, sub_anagrams, phrases, stats } = data;
 
-    // Update counter to the total from THIS search
     metricCount.textContent = String(stats.total);
-    metricStatus.textContent =
+    metricStatus.textContent = 
       `${stats.exact_count} exact · ${stats.sub_count} sub · ${stats.phrase_count} phrases ` +
       `(${stats.time_ms} ms)`;
 
-    statusEl.textContent =
-      `Searched "${data.input}" ${data.input_word_count > 1 ? "(multi-word)" : ""} — ` +
-      `${stats.total} anagrams found`;
+    statusEl.textContent = `Searched "${data.input}" — ${stats.total} anagrams found`;
 
     resultsEl.innerHTML = [
-      renderSection("Exact Anagrams", exact, "No exact matches.", wordTag),
-      renderSection("Sub-Anagrams",   sub_anagrams, "No sub-anagrams.", wordTag),
-      renderSection("Phrases",        phrases, "No phrases.",
+      renderSection("Exact Single Words", exact, "No exact single-word matches.", wordTag),
+      renderSection("Exact Multi-Word Phrases", phrases, "No exact phrases found.", 
         (p) => `<span class="anagram-tag">${escapeHtml(p.join(" "))}</span>`),
+      renderSection("Sub-Anagrams (Top 100)", sub_anagrams, "No sub-anagrams.", wordTag),
     ].join("");
+    
+    if (!resultsEl.innerHTML) {
+        resultsEl.innerHTML = `<p class="empty-state">No anagrams found.</p>`;
+    }
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
     metricStatus.textContent = "Error";
@@ -85,7 +81,7 @@ async function performSearch(word) {
 }
 
 async function loadDictionary() {
-  dictList.innerHTML = `<span class="empty-state">Loading…</span>`;
+  dictList.innerHTML = `<span class="empty-state">Loading...</span>`;
   try {
     const data = await safeFetch("/api/words/all");
     if (!data.count) {
@@ -106,14 +102,14 @@ searchForm.addEventListener("submit", (e) => {
   const w = wordInput.value.trim();
   if (!w) return;
   performSearch(w);
-  loadDictionary();   // refresh DB list alongside search
+  loadDictionary();
 });
 
 randomBtn.addEventListener("click", async () => {
   try {
     randomBtn.disabled = true;
     const original = randomBtn.textContent;
-    randomBtn.textContent = "Loading…";
+    randomBtn.textContent = "Loading...";
     const { word } = await safeFetch("/api/words/random");
     wordInput.value = word;
     await performSearch(word);
@@ -130,7 +126,7 @@ addForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const w = newWord.value.trim();
   if (!w) return;
-  addStatus.textContent = "Adding…";
+  addStatus.textContent = "Adding...";
   try {
     const data = await safeFetch("/api/words", {
       method: "POST",
@@ -139,7 +135,7 @@ addForm.addEventListener("submit", async (e) => {
     });
     addStatus.textContent = data.message
       ? `"${data.word}" ${data.message}`
-      : `Added "${data.word}" — search results refresh on next query`;
+      : `Added "${data.word}"`;
     newWord.value = "";
     await loadDictionary();
   } catch (err) {
@@ -148,6 +144,4 @@ addForm.addEventListener("submit", async (e) => {
 });
 
 refreshDictBtn.addEventListener("click", loadDictionary);
-
-// Initial load
 loadDictionary();

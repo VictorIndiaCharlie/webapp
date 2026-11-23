@@ -1,10 +1,6 @@
-"""
-Markov-chain pseudo-word generator.
-Trains a bigram model on the real dictionary at startup, then generates
-pronounceable synthetic words. These are added to the in-memory search map
-so they cost nothing at query time.
-"""
+import math
 import random
+import itertools
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional
 
@@ -65,3 +61,45 @@ class MarkovInventor:
                     made += 1
                 attempts += 1
         return list(out)
+
+    def score_word(self, word: str) -> float:
+        """Uses the Markov transitions to score how 'pronounceable' a word is."""
+        score = 0.0
+        prev = "^"
+        for ch in word:
+            if prev in self.transitions and ch in self.transitions[prev]:
+                total = sum(self.transitions[prev].values())
+                score += math.log(self.transitions[prev][ch] / total)
+            else:
+                return -9999.0 # Impossible transition
+            prev = ch
+        
+        # Check if it can end properly
+        if prev in self.transitions and "$" in self.transitions[prev]:
+            total = sum(self.transitions[prev].values())
+            score += math.log(self.transitions[prev]["$"] / total)
+        else:
+            return -9999.0
+            
+        return score
+
+    def generate_exact_anagrams(self, pool: str, count: int = 10) -> List[str]:
+        """Generates exact anagrams of the input pool, sorted by pronounceability."""
+        if len(pool) > 8:
+            return [] # Prevent explosion for very long names (8! = 40,320 perms)
+            
+        perms = set("".join(p) for p in itertools.permutations(pool))
+        
+        # Filter out impossible/terrible combinations first to save sorting time
+        scored = [(self.score_word(p), p) for p in perms if p != pool]
+        
+        # Sort by highest score first
+        scored.sort(reverse=True)
+        
+        results = []
+        for score, word in scored:
+            if score > -9999.0: # Must be pronounceable
+                results.append(word)
+                if len(results) >= count:
+                    break
+        return results

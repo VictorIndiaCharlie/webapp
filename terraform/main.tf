@@ -28,7 +28,8 @@ resource "docker_image" "backend" {
   }
   keep_locally = true
   triggers = {
-    always_run = timestamp()
+    # Forces a rebuild every time you run terraform apply
+    always_run = timestamp() 
   }
 }
 resource "docker_registry_image" "backend" {
@@ -79,6 +80,7 @@ module "ec2" {
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
 
+  # Wait for all images to be pushed to ECR before booting EC2s
   depends_on = [
     docker_registry_image.backend,
     docker_registry_image.frontend,
