@@ -29,7 +29,7 @@ resource "docker_image" "backend" {
   keep_locally = true
   triggers = {
     # Forces a rebuild every time you run terraform apply
-    always_run = timestamp() 
+    always_run = timestamp()
   }
 }
 resource "docker_registry_image" "backend" {

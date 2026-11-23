@@ -71,34 +71,34 @@ class MarkovInventor:
                 total = sum(self.transitions[prev].values())
                 score += math.log(self.transitions[prev][ch] / total)
             else:
-                return -9999.0 # Impossible transition
+                return -9999.0  # Impossible transition
             prev = ch
-        
+
         # Check if it can end properly
         if prev in self.transitions and "$" in self.transitions[prev]:
             total = sum(self.transitions[prev].values())
             score += math.log(self.transitions[prev]["$"] / total)
         else:
             return -9999.0
-            
+
         return score
 
     def generate_exact_anagrams(self, pool: str, count: int = 10) -> List[str]:
         """Generates exact anagrams of the input pool, sorted by pronounceability."""
         if len(pool) > 8:
-            return [] # Prevent explosion for very long names (8! = 40,320 perms)
-            
+            return []  # Prevent explosion for very long names
+
         perms = set("".join(p) for p in itertools.permutations(pool))
-        
-        # Filter out impossible/terrible combinations first to save sorting time
+
+        # Filter out impossible combinations first to save sorting time
         scored = [(self.score_word(p), p) for p in perms if p != pool]
-        
+
         # Sort by highest score first
         scored.sort(reverse=True)
-        
+
         results = []
         for score, word in scored:
-            if score > -9999.0: # Must be pronounceable
+            if score > -9999.0:  # Must be pronounceable
                 results.append(word)
                 if len(results) >= count:
                     break

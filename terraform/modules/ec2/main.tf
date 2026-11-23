@@ -41,7 +41,7 @@ resource "aws_instance" "backend" {
   })
 
   depends_on = [time_sleep.wait_for_db]
-  tags = { Name = "${var.project_name}-backend" }
+  tags       = { Name = "${var.project_name}-backend" }
 }
 
 resource "aws_instance" "frontend" {
@@ -59,5 +59,5 @@ resource "aws_instance" "frontend" {
   })
 
   depends_on = [aws_instance.backend]
-  tags = { Name = "${var.project_name}-frontend" }
+  tags       = { Name = "${var.project_name}-frontend" }
 }

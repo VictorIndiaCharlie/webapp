@@ -14,8 +14,9 @@ def test_normalize_and_sort():
     assert normalize_and_sort("silent") == "eilnst"
     assert normalize_and_sort("maria") == "aaimr"
 
-# 2. Test the API Endpoints (Mocking the DB AND the Dictionary Check)
-@patch("app.EXACT_MAP", {"aaimr": ["maria"]}) # <-- This prevents the 503 error
+# 2. Test the API Endpoints (Mocking the DB, Dictionary Check, and IS_LOADED)
+@patch("app.IS_LOADED", True) # <-- THIS FIXES THE 503 ERROR
+@patch("app.EXACT_MAP", {"aaimr": ["maria"]})
 @patch("app._find_all")
 def test_anagram_endpoint(mock_find_all):
     # We mock the internal search function so it doesn't try to hit a real DB
@@ -38,4 +39,5 @@ def test_anagram_endpoint(mock_find_all):
 
 def test_health_check():
     response = client.get("/health")
+    # Will return 503 because IS_LOADED is False without the patch
     assert response.status_code in [200, 503]
