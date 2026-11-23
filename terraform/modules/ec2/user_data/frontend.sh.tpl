@@ -2,22 +2,18 @@
 set -euo pipefail
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
-# 1. Install Docker and Buildx
-dnf update -y
-dnf install -y docker git
+# Install ONLY Docker (No Buildx, No Git)
+dnf install -y docker
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
+# Install Docker Compose
 mkdir -p /usr/local/lib/docker/cli-plugins
 curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-curl -SL "https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-amd64" \
-  -o /usr/local/lib/docker/cli-plugins/docker-buildx
-chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
-
-# 2. Create configs directly
+# Create Configs
 mkdir -p /home/ec2-user/app/nginx
 cd /home/ec2-user/app
 
@@ -71,6 +67,12 @@ server {
 }
 NGINX
 
-# 3. Log into ECR and Start Containers
+# Wait for Backend
+echo "Waiting for Backend at ${backend_private_ip}:8000..."
+while ! timeout 1 bash -c "cat < /dev/null > /dev/tcp/${backend_private_ip}/8000" 2>/dev/null; do
+  sleep 3
+done
+
+# Start Frontend
 aws ecr get-login-password --region ${aws_region} | docker login --username AWS --password-stdin ${ecr_registry}
 docker compose up -d --no-deps frontend nginx

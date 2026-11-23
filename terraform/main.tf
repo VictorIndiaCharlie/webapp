@@ -20,41 +20,50 @@ module "ecr" {
   aws_region = var.aws_region
 }
 
-
-resource "null_resource" "build_and_push" {
-
+# 1. BUILD BACKEND IMAGE
+resource "docker_image" "backend" {
+  name = "${module.ecr.registry_url}/anagram-backend:latest"
+  build {
+    context = "${path.module}/../backend"
+  }
+  keep_locally = true
   triggers = {
     always_run = timestamp()
   }
-
-  provisioner "local-exec" {
-    working_dir = "${path.module}/.."
-    command     = <<EOT
-      echo "▶ 1. Creating app tarball..."
-      tar --exclude='.git' --exclude='node_modules' --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='terraform' --exclude='.terraform' --exclude='terraform.tfstate*' --exclude='shell' -czf /tmp/anagram-app.tar.gz -C . .
-
-      echo "▶ 2. Uploading tarball to S3..."
-      aws s3 cp /tmp/anagram-app.tar.gz s3://${module.artifact.bucket_name}/anagram-app.tar.gz --region ${var.aws_region}
-
-      echo "▶ 3. Logging into ECR..."
-      aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${module.ecr.registry_url}
-
-      echo "▶ 4. Building images locally..."
-      docker build -t ${module.ecr.registry_url}/anagram-backend:latest ./backend
-      docker build -t ${module.ecr.registry_url}/anagram-frontend:latest ./frontend
-      docker build -t ${module.ecr.registry_url}/anagram-nginx:latest ./nginx
-
-      echo "▶ 5. Pushing images to ECR..."
-      docker push ${module.ecr.registry_url}/anagram-backend:latest
-      docker push ${module.ecr.registry_url}/anagram-frontend:latest
-      docker push ${module.ecr.registry_url}/anagram-nginx:latest
-    EOT
-  }
-
-  depends_on = [module.artifact, module.ecr]
+}
+resource "docker_registry_image" "backend" {
+  name = docker_image.backend.name
 }
 
+# 2. BUILD FRONTEND IMAGE
+resource "docker_image" "frontend" {
+  name = "${module.ecr.registry_url}/anagram-frontend:latest"
+  build {
+    context = "${path.module}/../frontend"
+  }
+  keep_locally = true
+  triggers = {
+    always_run = timestamp()
+  }
+}
+resource "docker_registry_image" "frontend" {
+  name = docker_image.frontend.name
+}
 
+# 3. BUILD NGINX IMAGE
+resource "docker_image" "nginx" {
+  name = "${module.ecr.registry_url}/anagram-nginx:latest"
+  build {
+    context = "${path.module}/../nginx"
+  }
+  keep_locally = true
+  triggers = {
+    always_run = timestamp()
+  }
+}
+resource "docker_registry_image" "nginx" {
+  name = docker_image.nginx.name
+}
 
 module "ec2" {
   source                = "./modules/ec2"
@@ -70,9 +79,11 @@ module "ec2" {
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
 
-  depends_on = [time_sleep.wait_for_db]
-
-  depends_on = [null_resource.build_and_push]
+  depends_on = [
+    docker_registry_image.backend,
+    docker_registry_image.frontend,
+    docker_registry_image.nginx
+  ]
 }
 
 module "alb" {
@@ -82,11 +93,4 @@ module "alb" {
   public_subnet_ids    = module.network.public_subnet_ids
   alb_sg_id            = module.network.alb_sg_id
   frontend_instance_id = module.ec2.frontend_instance_id
-}
-
-module "monitoring" {
-  source         = "./modules/monitoring"
-  project_name   = var.project_name
-  alb_arn_suffix = module.alb.alb_arn_suffix # This output must be added
-  alert_email    = "your-email@example.com"  # Optional
 }

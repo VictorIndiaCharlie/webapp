@@ -1,26 +1,20 @@
 #!/bin/bash
 set -euo pipefail
-exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
-# 1. Install Docker and Buildx
-dnf update -y
-dnf install -y docker git
+# Install ONLY Docker (No Buildx, No Git)
+dnf install -y docker
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
+# Install Docker Compose
 mkdir -p /usr/local/lib/docker/cli-plugins
 curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-curl -SL "https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-amd64" \
-  -o /usr/local/lib/docker/cli-plugins/docker-buildx
-chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
-
-# 2. Create configs directly (Quoted heredoc)
+# Create Compose Config
 mkdir -p /home/ec2-user/app
 cd /home/ec2-user/app
-
 cat << 'COMPOSE' > docker-compose.yml
 services:
   backend:
@@ -42,15 +36,12 @@ services:
       retries: 10
 COMPOSE
 
-# Wait for the Database to be ready
-DB_IP=${db_private_ip}
-echo "Waiting for Database at $DB_IP:5432..."
-while ! timeout 1 bash -c "cat < /dev/null > /dev/tcp/$DB_IP/5432" 2>/dev/null; do
-  echo "Database not ready yet. Retrying in 5 seconds..."
-  sleep 5
+# Wait for Database
+echo "Waiting for DB at ${db_private_ip}:5432..."
+while ! timeout 1 bash -c "cat < /dev/null > /dev/tcp/${db_private_ip}/5432" 2>/dev/null; do
+  sleep 3
 done
-echo "Database is ready! Starting Backend..."
 
-# 3. Log into ECR and Start Backend
+# Start Backend
 aws ecr get-login-password --region ${aws_region} | docker login --username AWS --password-stdin ${ecr_registry}
 docker compose up -d --no-deps backend

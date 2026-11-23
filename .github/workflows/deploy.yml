@@ -1,9 +1,8 @@
 name: Deploy to AWS
 
 on:
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
 
-# Prevents two deployments from running at the same time
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -11,7 +10,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production   
+    environment: production
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -28,22 +27,33 @@ jobs:
         with:
           terraform_version: 1.10.0
 
-      - name: Bootstrap S3 State Bucket
+      - name: Find S3 State Bucket
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          BUCKET_NAME="anagram-tfstate-${ACCOUNT_ID}"
-          echo "Using state bucket: $BUCKET_NAME"
-          
-          # Create bucket if it doesn't exist
-          aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null || \
-            aws s3api create-bucket --bucket "$BUCKET_NAME" --region ${{ secrets.AWS_REGION }} --create-bucket-configuration LocationConstraint=${{ secrets.AWS_REGION }}
-          
-          # Enable versioning for safety
-          aws s3api put-bucket-versioning --bucket "$BUCKET_NAME" --versioning-configuration Status=Enabled
-          
-          # Save the bucket name for the next step
-          echo "STATE_BUCKET=$BUCKET_NAME" >> $GITHUB_ENV
+          echo "STATE_BUCKET=anagram-tfstate-${ACCOUNT_ID}" >> $GITHUB_ENV
+          echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com" >> $GITHUB_ENV
 
+      # --- NEW: Create Tarball and Upload to S3 ---
+      - name: Upload Configuration to S3
+        run: |
+          # Note: This assumes the S3 bucket already exists via Terraform. 
+          # If it's a fresh deploy, you might need to run a partial `terraform apply` first.
+          tar --exclude='.git' --exclude='node_modules' --exclude='terraform' -czf /tmp/anagram-app.tar.gz -C . .
+          aws s3 cp /tmp/anagram-app.tar.gz s3://anagram-artifacts-$(aws sts get-caller-identity --query Account --output text)/anagram-app.tar.gz
+
+      # --- NEW: Build and Push to ECR ---
+      - name: Build and Push Docker Images
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+          docker build -t ${{ env.ECR_REGISTRY }}/anagram-backend:latest ./backend
+          docker build -t ${{ env.ECR_REGISTRY }}/anagram-frontend:latest ./frontend
+          docker build -t ${{ env.ECR_REGISTRY }}/anagram-nginx:latest ./nginx
+          
+          docker push ${{ env.ECR_REGISTRY }}/anagram-backend:latest
+          docker push ${{ env.ECR_REGISTRY }}/anagram-frontend:latest
+          docker push ${{ env.ECR_REGISTRY }}/anagram-nginx:latest
+
+      # --- TERRAFORM ---
       - name: Terraform Init
         working-directory: ./terraform
         run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
