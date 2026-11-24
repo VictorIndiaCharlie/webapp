@@ -20,6 +20,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # SHA256 of the app source. Passed as a Terraform var: any code change
+      # changes the EC2 user_data (which embeds the hash) -> instances are
+      # replaced -> they boot with the fresh images.
+      - name: Compute Code Hash
+        run: |
+          CODE_HASH=$(find backend frontend nginx -type f \
+            -not -path '*/node_modules/*' \
+            | sort | xargs sha256sum | sha256sum | awk '{print $1}')
+          echo "CODE_HASH=${CODE_HASH}" >> $GITHUB_ENV
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -60,16 +70,10 @@ jobs:
         working-directory: ./terraform
         run: terraform apply -auto-approve -target=module.ecr -target=module.artifact
 
-      # --- Create Tarball and Upload to S3 (bucket now exists) ---
-      - name: Upload Configuration to S3
-        run: |
-          tar --exclude='.git' --exclude='node_modules' --exclude='terraform' -czf /tmp/anagram-app.tar.gz -C . .
-          aws s3 cp /tmp/anagram-app.tar.gz s3://anagram-artifacts-$(aws sts get-caller-identity --query Account --output text)/anagram-app.tar.gz
-
       # --- Build and Push to ECR (repos now exist) ---
       - name: Build and Push Docker Images
         run: |
-          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+          aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
           docker build -t ${{ env.ECR_REGISTRY }}/anagram-backend:latest ./backend
           docker build -t ${{ env.ECR_REGISTRY }}/anagram-frontend:latest ./frontend
           docker build -t ${{ env.ECR_REGISTRY }}/anagram-nginx:latest ./nginx
@@ -80,4 +84,4 @@ jobs:
 
       - name: Terraform Apply
         working-directory: ./terraform
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -var "code_hash=${CODE_HASH}"

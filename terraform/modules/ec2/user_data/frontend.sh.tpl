@@ -16,20 +16,18 @@ cd /home/ec2-user/app
 
 cat << 'COMPOSE' > docker-compose.yml
 services:
-  backend:
-    image: ${ecr_registry}/anagram-backend:latest
-    container_name: anagram_backend
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-
   frontend:
     image: ${ecr_registry}/anagram-frontend:latest
     container_name: anagram_frontend
     restart: unless-stopped
     environment:
       PORT: 3000
-      BACKEND_URL: http://backend:8000
+      # Points at the dedicated backend EC2 (this instance does not host
+      # the backend container — that leftover service was removed).
+      BACKEND_URL: http://${backend_private_ip}:8000
+# Changing this line replaces the instance (user_data_replace_on_change)
+# so a new code hash always pulls the fresh image on a clean boot.
+# code_hash: ${code_hash}
 
   nginx:
     image: ${ecr_registry}/anagram-nginx:latest
@@ -41,7 +39,6 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - frontend
-      - backend
 COMPOSE
 
 cat << 'NGINX' > nginx/nginx.conf

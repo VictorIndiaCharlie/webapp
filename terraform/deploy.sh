@@ -15,6 +15,8 @@ export AWS_REGION="eu-central-1"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 STATE_BUCKET="anagram-tfstate-${ACCOUNT_ID}"
+CODE_HASH=$(find backend frontend nginx -type f -not -path '*/node_modules/*' \
+  | sort | xargs sha256sum | sha256sum | awk '{print $1}')
 
 echo "======================================"
 echo " 🚀 STARTING LOCAL DEPLOYMENT"
@@ -32,13 +34,11 @@ terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET"
 
 # 3. Create ECR and S3 Infrastructure FIRST
 echo "▶ 3. Provisioning ECR Repositories and Artifact Bucket..."
-cd terraform
 terraform apply -auto-approve -target=module.ecr -target=module.artifact
 cd ..
 
 # 4. Login to ECR & Build Images
 echo "▶ 4. Logging into ECR and Building Images..."
-cd ..
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
 docker build -t $ECR_REGISTRY/anagram-backend:latest ./backend
@@ -53,7 +53,7 @@ docker push $ECR_REGISTRY/anagram-nginx:latest
 # 5. Apply the Rest of the Infrastructure
 echo "▶ 5. Deploying Remaining Infrastructure (VPC, EC2, ALB)..."
 cd terraform
-terraform apply -auto-approve
+terraform apply -auto-approve -var "code_hash=${CODE_HASH}"
 
 echo "======================================"
 echo " ✅ DEPLOYMENT SUCCESSFUL!"
