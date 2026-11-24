@@ -11,6 +11,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    # AWS_REGION is intentionally a plain env var, NOT a secret:
+    # GitHub masks secret values in logs, which turned the ALB DNS name
+    # in the output into "anagram-alb-977742027.***.elb.amazonaws.com".
+    env:
+      AWS_REGION: eu-central-1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -20,7 +25,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -31,7 +36,7 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "STATE_BUCKET=anagram-tfstate-${ACCOUNT_ID}" >> $GITHUB_ENV
-          echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com" >> $GITHUB_ENV
+          echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_ENV
 
       # The state bucket is the Terraform backend and is NOT created by Terraform.
       # It must exist before `terraform init` on a fresh account.
