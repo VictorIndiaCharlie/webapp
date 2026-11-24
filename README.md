@@ -6,7 +6,7 @@ A full-stack anagram discovery tool that turns names into exact anagrams, sub-an
 
 ## Architecture
 
-The application uses a strict 3-tier architecture, sitting behind an Application Load Balancer (ALB), with an event-driven serverless monitoring stack and a fully automated CI/CD pipeline.
+The application uses a strict 3-tier architecture, sitting behind an Application Load Balancer (ALB), with a fully automated CI/CD pipeline.
 
 ```text
                           Internet
@@ -47,11 +47,10 @@ The application uses a strict 3-tier architecture, sitting behind an Application
 
 - **Frontend:** Node.js + Express, Vanilla HTML/CSS/JS
 - **Backend:** Python 3.11 + FastAPI (2M+ word dictionary loaded in memory)
-- **Database:** PostgreSQL 16 (Alpine)
+- **Database:** PostgreSQL 16 (Alpine), seeded on first boot
 - **Proxy:** Nginx (Alpine)
-- **Infrastructure (CD):** Terraform, Docker Provider (Native ECR build), AWS EC2, ALB, ECR, S3
+- **Infrastructure (CD):** Terraform, Docker (ECR), AWS EC2, ALB, ECR, S3
 - **CI/CD:** GitHub Actions, `pytest`, `flake8`, `black` (Auto-formatter)
-- **Monitoring:** AWS CloudWatch, Amazon SNS, AWS Lambda (Python 3.12)
 
 ---
 
@@ -60,6 +59,7 @@ The application uses a strict 3-tier architecture, sitting behind an Application
 ```text
 anagram-generator/
 ├── docker-compose.yml            # Local development orchestration
+├── deploy.sh                     # One-command AWS deploy (local)
 ├── README.md
 │
 ├── .github/workflows/
@@ -75,29 +75,30 @@ anagram-generator/
 │   ├── app.py                    # FastAPI server & recursive search logic
 │   ├── inventor.py               # Markov chain generator
 │   ├── test_app.py               # Pytest unit tests
-│   └── wordlist.txt              # 2M+ word dictionary
+│   ├── wordlist.txt              # 2M+ word dictionary
+│   └── db/init.sql               # DB schema & seed data (same as root db/)
 │
 ├── frontend/                     # Node.js UI
 │   ├── Dockerfile
 │   └── public/                   # HTML/CSS/JS Dashboard
 │
 ├── db/
-│   └── init.sql                  # Database schema & seed data
+│   └── init.sql                  # Database schema & seed data (local dev + EC2 DB)
 │
 ├── nginx/
 │   ├── Dockerfile
 │   └── nginx.conf                # Proxy configuration
 │
 └── terraform/                    # AWS Infrastructure
-    ├── main.tf                   # Root config & Docker Image builds
-    ├── providers.tf              # AWS, Time, and Docker Providers
+    ├── main.tf                   # Root config & module wiring (code_hash redeploy)
+    ├── providers.tf              # AWS Provider + S3 state backend
     └── modules/
         ├── network/              # VPC, Subnets, Security Groups
         ├── iam/                  # EC2 Roles & Permissions
         ├── ecr/                  # Container Registries
+        ├── artifact/             # S3 Artifact Bucket
         ├── ec2/                  # 3 Instances + user_data scripts
-        ├── alb/                  # Load Balancer
-        └── monitoring/           # Lambda, SNS, CloudWatch
+        └── alb/                  # Load Balancer
 ```
 
 ---
@@ -113,6 +114,8 @@ docker compose up --build -d
 # 2. Access the app
 # Open http://localhost:8080 in your browser
 # Note: The backend takes ~60 seconds to load the 2M word dictionary into memory.
+# Note: The DB seeds itself from db/init.sql on first boot, so the
+# dictionary (and names you add) work out of the box.
 
 # 3. Tear down
 docker compose down -v
@@ -144,53 +147,73 @@ You can clone this repository and deploy the entire infrastructure into your own
 ### Prerequisites
 - Terraform installed
 - AWS CLI configured (`aws configure`) with AdministratorAccess
-- Docker running locally (Terraform uses it to build images)
+- Docker running locally (the deploy script builds the images and pushes them to ECR)
 
-### Quick Start (Local Terraform)
-Because the state backend is dynamic (clone-and-run friendly), initialize it using your AWS Account ID:
+### Quick Start (One Command)
+Because the state backend is dynamic (clone-and-run friendly), a single script handles the whole deploy — it creates your state bucket, pre-provisions the ECR repositories + S3 bucket, builds and pushes the images to ECR, then runs the full `terraform apply`:
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/VictorIndiaCharlie/webapp.git
-cd webapp/terraform
+cd webapp
 
-# 2. Initialize and Deploy (Dynamically injects your state bucket)
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-terraform init -reconfigure -backend-config="bucket=anagram-tfstate-${ACCOUNT_ID}"
-terraform apply -auto-approve
+# 2. Deploy everything
+./deploy.sh
 
-# 3. Get the App URL
+# 3. Get the App URL (run from the terraform/ folder)
 terraform output -raw alb_dns_name
 ```
 *(Note: Ensure you use `http://` and not `https://` when opening the URL).*
 
+### Manual Steps (what `deploy.sh` does under the hood)
+```bash
+# 1. Compute your account ID and the code hash
+export AWS_REGION="eu-central-1"
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+STATE_BUCKET="anagram-tfstate-${ACCOUNT_ID}"
+CODE_HASH=$(find backend frontend nginx -type f -not -path '*/node_modules/*' \
+  | sort | xargs sha256sum | sha256sum | awk '{print $1}')
+
+# 2. Ensure the state bucket exists, then init
+aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null || \
+  aws s3api create-bucket --bucket "$STATE_BUCKET" --region $AWS_REGION \
+  --create-bucket-configuration LocationConstraint=$AWS_REGION
+cd terraform
+terraform init -reconfigure -backend-config="bucket=$STATE_BUCKET"
+
+# 3. Provision ECR repositories + artifact bucket FIRST (so pushes have a home)
+terraform apply -auto-approve -target=module.ecr -target=module.artifact
+cd ..
+
+# 4. Login to ECR & build/push the 3 images
+aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+docker build -t $ECR_REGISTRY/anagram-backend:latest ./backend && docker push $ECR_REGISTRY/anagram-backend:latest
+docker build -t $ECR_REGISTRY/anagram-frontend:latest ./frontend && docker push $ECR_REGISTRY/anagram-frontend:latest
+docker build -t $ECR_REGISTRY/anagram-nginx:latest ./nginx && docker push $ECR_REGISTRY/anagram-nginx:latest
+
+# 5. Full deploy (code_hash replaces the app EC2s only when code changed)
+cd terraform
+terraform apply -auto-approve -var "code_hash=${CODE_HASH}"
+```
+
 ### GitHub Actions CD (`.github/workflows/deploy.yml`)
 Deployment is triggered manually via the GitHub UI.
-1. Add `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_REGION` to GitHub Secrets.
+1. Add `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to GitHub Secrets (the region `eu-central-1` is built into the workflow).
 2. Go to **Actions** -> **Deploy to AWS** -> **Run workflow**.
 
 ---
 
 ## ⚙️ How it Works (The DevOps Pipeline)
 
-1. **The Build Process (Pure Terraform):** When `terraform apply` runs, Terraform uses the **Kreuzwerker Docker Provider** to natively build the Docker images and push them to **AWS ECR** before provisioning the EC2s. There are no `null_resource` shell scripts required.
+1. **The Build Process:** The deploy script (local `./deploy.sh` or the GitHub Actions workflow) logs into **AWS ECR**, builds the three Docker images, and pushes them to your registry. Terraform pre-applies the ECR + S3 modules so the repos and bucket exist before the pushes, then provisions the EC2s. Every deploy computes a **CODE_HASH** over the `backend/`, `frontend/`, and `nginx/` sources — when it changes, only the Backend and Frontend instances are replaced (they pull the fresh images on boot), while the DB instance is left untouched so your data survives redeploys.
 2. **The 3-Tier Setup:** 
    - Terraform spins up a **VPC** with public and private subnets.
    - Three `t3.micro` EC2 instances launch in private subnets.
    - The Backend EC2 `user_data` script creates a **2GB Swap File** to prevent Out-Of-Memory (OOM) crashes while loading the 2M word dictionary.
+   - Startup order is enforced in the `user_data` scripts: the DB boots first, the Backend waits for the DB port, and the Frontend waits for the Backend port.
 3. **The Request Flow:** 
    - User hits the **ALB**.
    - ALB forwards to the **Frontend EC2** (Nginx).
    - Nginx serves static files and proxies `/api` requests to the **Backend EC2** (FastAPI).
    - FastAPI queries the **DB EC2** (PostgreSQL) and returns the results.
-
----
-
-## 🚨 Serverless Monitoring (Lambda)
-
-Instead of managing a heavy Prometheus/Grafana stack, this repo uses AWS-native serverless monitoring.
-
-**The Flow:**
-1. **CloudWatch Alarm:** Watches the ALB for `HTTPCode_Target_5XX_Count`. If there are more than 5 server errors in 5 minutes, it triggers.
-2. **Amazon SNS:** The alarm publishes a message to an SNS Topic.
-3. **AWS Lambda:** A Python Lambda function is subscribed to the topic. When triggered, it parses the alarm payload and logs the details to CloudWatch.
