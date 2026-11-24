@@ -70,12 +70,6 @@ jobs:
         working-directory: ./terraform
         run: terraform apply -auto-approve -target=module.ecr -target=module.artifact
 
-      # --- Create Tarball and Upload to S3 (bucket now exists) ---
-      - name: Upload Configuration to S3
-        run: |
-          tar --exclude='.git' --exclude='node_modules' --exclude='terraform' -czf /tmp/anagram-app.tar.gz -C . .
-          aws s3 cp /tmp/anagram-app.tar.gz s3://anagram-artifacts-$(aws sts get-caller-identity --query Account --output text)/anagram-app.tar.gz
-
       # --- Build and Push to ECR (repos now exist) ---
       - name: Build and Push Docker Images
         run: |
