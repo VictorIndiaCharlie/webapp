@@ -11,16 +11,31 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
+    # AWS_REGION is intentionally a plain env var, NOT a secret:
+    # GitHub masks secret values in logs, which turned the ALB DNS name
+    # in the output into "anagram-alb-977742027.***.elb.amazonaws.com".
+    env:
+      AWS_REGION: eu-central-1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # SHA256 of the app source. Passed as a Terraform var: any code change
+      # changes the EC2 user_data (which embeds the hash) -> instances are
+      # replaced -> they boot with the fresh images.
+      - name: Compute Code Hash
+        run: |
+          CODE_HASH=$(find backend frontend nginx -type f \
+            -not -path '*/node_modules/*' \
+            | sort | xargs sha256sum | sha256sum | awk '{print $1}')
+          echo "CODE_HASH=${CODE_HASH}" >> $GITHUB_ENV
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -31,20 +46,40 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "STATE_BUCKET=anagram-tfstate-${ACCOUNT_ID}" >> $GITHUB_ENV
-          echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com" >> $GITHUB_ENV
+          echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" >> $GITHUB_ENV
 
-      # --- NEW: Create Tarball and Upload to S3 ---
+      # The state bucket is the Terraform backend and is NOT created by Terraform.
+      # It must exist before `terraform init` on a fresh account.
+      # (Must live in eu-central-1 to match the backend region in providers.tf.)
+      - name: Ensure State Bucket Exists
+        run: |
+          aws s3api head-bucket --bucket "${STATE_BUCKET}" 2>/dev/null || \
+            aws s3api create-bucket --bucket "${STATE_BUCKET}" --region eu-central-1 \
+            --create-bucket-configuration LocationConstraint=eu-central-1
+
+      # --- TERRAFORM ---
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
+
+      # FIX: The artifacts bucket (module.artifact) and ECR repos (module.ecr) are
+      # created BY Terraform, so they must be provisioned before the S3 upload
+      # and docker push below. This mirrors terraform/deploy.sh.
+      # module.iam is pulled in automatically as a dependency of module.artifact.
+      - name: Terraform Pre-Apply (ECR + Artifact Bucket)
+        working-directory: ./terraform
+        run: terraform apply -auto-approve -target=module.ecr -target=module.artifact
+
+      # --- Create Tarball and Upload to S3 (bucket now exists) ---
       - name: Upload Configuration to S3
         run: |
-          # Note: This assumes the S3 bucket already exists via Terraform. 
-          # If it's a fresh deploy, you might need to run a partial `terraform apply` first.
           tar --exclude='.git' --exclude='node_modules' --exclude='terraform' -czf /tmp/anagram-app.tar.gz -C . .
           aws s3 cp /tmp/anagram-app.tar.gz s3://anagram-artifacts-$(aws sts get-caller-identity --query Account --output text)/anagram-app.tar.gz
 
-      # --- NEW: Build and Push to ECR ---
+      # --- Build and Push to ECR (repos now exist) ---
       - name: Build and Push Docker Images
         run: |
-          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+          aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
           docker build -t ${{ env.ECR_REGISTRY }}/anagram-backend:latest ./backend
           docker build -t ${{ env.ECR_REGISTRY }}/anagram-frontend:latest ./frontend
           docker build -t ${{ env.ECR_REGISTRY }}/anagram-nginx:latest ./nginx
@@ -53,11 +88,6 @@ jobs:
           docker push ${{ env.ECR_REGISTRY }}/anagram-frontend:latest
           docker push ${{ env.ECR_REGISTRY }}/anagram-nginx:latest
 
-      # --- TERRAFORM ---
-      - name: Terraform Init
-        working-directory: ./terraform
-        run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
-
       - name: Terraform Apply
         working-directory: ./terraform
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -var "code_hash=${CODE_HASH}"

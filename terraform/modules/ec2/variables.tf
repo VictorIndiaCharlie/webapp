@@ -12,3 +12,7 @@ variable "postgres_password" {
   sensitive = true
 }
 variable "ecr_registry" { type = string }
+variable "code_hash" {
+  type        = string
+  description = "Hash of the app source; changing it replaces the app instances"
+}

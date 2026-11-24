@@ -16,3 +16,9 @@ variable "postgres_password" {
   sensitive   = true
   default     = "change-me-in-production"
 }
+
+variable "code_hash" {
+  description = "SHA256 of backend+frontend+nginx source. Changing it replaces the app EC2 instances so they pull the fresh images."
+  type        = string
+  default     = "0"
+}

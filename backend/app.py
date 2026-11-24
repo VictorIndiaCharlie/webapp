@@ -98,8 +98,10 @@ def normalize_and_sort(word: str) -> str:
 EXACT_MAP: Dict[str, List[str]] = defaultdict(list)
 INVENTED_MAP: Dict[str, List[str]] = defaultdict(list)
 ALL_KEYS_SORTED: List[str] = []
+ALL_KEY_SET: set = set()
 INVENTED_SET: set = set()
 IS_LOADED = False
+DB_READY = False
 INVENTOR: MarkovInventor = None
 
 
@@ -222,10 +224,56 @@ def build_dictionaries():
 
     all_keys = set(EXACT_MAP.keys()) | set(INVENTED_MAP.keys())
     ALL_KEYS_SORTED = sorted(all_keys, key=lambda k: (len(k), k))
+    ALL_KEY_SET = set(ALL_KEYS_SORTED)
 
     elapsed = time.perf_counter() - t0
     print(f"[init] Loaded {len(real_words)} real words in {elapsed:.1f}s")
+    load_db_words()
     IS_LOADED = True
+
+
+def load_db_words():
+    """Merge user-provided words (DB) into the in-memory engine."""
+    global ALL_KEYS_SORTED, ALL_KEY_SET
+    try:
+        with db_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT word FROM words")
+            db_words = [row[0].strip().lower() for row in cur.fetchall()]
+    except Exception as exc:
+        print(f"[init] Failed to load DB words: {exc}")
+        return
+
+    new_keys = set()
+    merged = 0
+    for w in db_words:
+        if not w.isalpha():
+            continue
+        key = normalize_and_sort(w)
+        if not key:
+            continue
+        existing = EXACT_MAP.get(key)
+        if existing is None:
+            EXACT_MAP[key].append(w)
+            new_keys.add(key)
+        elif w not in existing:
+            existing.append(w)
+        merged += 1
+
+    if new_keys:
+        ALL_KEY_SET |= new_keys
+        ALL_KEYS_SORTED = sorted(ALL_KEY_SET, key=lambda k: (len(k), k))
+    print(f"[init] Merged {merged} DB words into the in-memory engine")
+
+
+def add_word_to_engine(word: str, key: str):
+    """Register a freshly added word in the in-memory engine (no restart needed)."""
+    global ALL_KEYS_SORTED, ALL_KEY_SET
+    w = word.lower()
+    if w not in EXACT_MAP.get(key, []):
+        EXACT_MAP[key].append(w)
+    if key not in ALL_KEY_SET:
+        ALL_KEY_SET.add(key)
+        ALL_KEYS_SORTED = sorted(ALL_KEY_SET, key=lambda k: (len(k), k))
 
 
 # ---------------------------------------------------------------- app
@@ -338,6 +386,14 @@ def random_word():
     return {"word": row[0]}
 
 
+@app.get("/api/words/all")
+def all_words():
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT word FROM words ORDER BY word")
+        words = [row[0] for row in cur.fetchall()]
+    return {"count": len(words), "words": words}
+
+
 @app.post("/api/words", status_code=201)
 def add_word(payload: WordIn):
     word = payload.word
@@ -350,6 +406,7 @@ def add_word(payload: WordIn):
         )
         inserted = cur.fetchone() is not None
         conn.commit()
+    add_word_to_engine(word, key)
     return {
         "word": word,
         "message": None if inserted else "already exists",

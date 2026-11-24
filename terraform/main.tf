@@ -79,6 +79,7 @@ module "ec2" {
   artifact_bucket_name  = module.artifact.bucket_name
   postgres_password     = var.postgres_password
   ecr_registry          = module.ecr.registry_url
+  code_hash             = var.code_hash
 
   # Wait for all images to be pushed to ECR before booting EC2s
   depends_on = [

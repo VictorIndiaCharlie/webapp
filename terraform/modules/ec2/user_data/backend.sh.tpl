@@ -30,6 +30,9 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+# Changing this line replaces the instance (user_data_replace_on_change)
+# so a new code hash always pulls the fresh image on a clean boot.
+# code_hash: ${code_hash}
     environment:
       POSTGRES_HOST: ${db_private_ip}
       POSTGRES_PORT: 5432

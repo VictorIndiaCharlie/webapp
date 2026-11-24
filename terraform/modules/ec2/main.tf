@@ -38,6 +38,7 @@ resource "aws_instance" "backend" {
     db_private_ip     = aws_instance.db.private_ip
     ecr_registry      = var.ecr_registry
     postgres_password = var.postgres_password
+    code_hash         = var.code_hash
   })
 
   depends_on = [time_sleep.wait_for_db]
@@ -56,6 +57,7 @@ resource "aws_instance" "frontend" {
     aws_region         = var.aws_region
     ecr_registry       = var.ecr_registry
     backend_private_ip = aws_instance.backend.private_ip
+    code_hash          = var.code_hash
   })
 
   depends_on = [aws_instance.backend]
