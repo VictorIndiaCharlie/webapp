@@ -20,52 +20,6 @@ module "ecr" {
   aws_region = var.aws_region
 }
 
-# 1. BUILD BACKEND IMAGE
-resource "docker_image" "backend" {
-  name = "${module.ecr.registry_url}/anagram-backend:latest"
-  build {
-    context = "${path.module}/../backend"
-  }
-  keep_locally = true
-  triggers = {
-    # Forces a rebuild every time you run terraform apply
-    always_run = timestamp()
-  }
-}
-resource "docker_registry_image" "backend" {
-  name = docker_image.backend.name
-}
-
-# 2. BUILD FRONTEND IMAGE
-resource "docker_image" "frontend" {
-  name = "${module.ecr.registry_url}/anagram-frontend:latest"
-  build {
-    context = "${path.module}/../frontend"
-  }
-  keep_locally = true
-  triggers = {
-    always_run = timestamp()
-  }
-}
-resource "docker_registry_image" "frontend" {
-  name = docker_image.frontend.name
-}
-
-# 3. BUILD NGINX IMAGE
-resource "docker_image" "nginx" {
-  name = "${module.ecr.registry_url}/anagram-nginx:latest"
-  build {
-    context = "${path.module}/../nginx"
-  }
-  keep_locally = true
-  triggers = {
-    always_run = timestamp()
-  }
-}
-resource "docker_registry_image" "nginx" {
-  name = docker_image.nginx.name
-}
-
 module "ec2" {
   source                = "./modules/ec2"
   project_name          = var.project_name
@@ -81,12 +35,9 @@ module "ec2" {
   ecr_registry          = module.ecr.registry_url
   code_hash             = var.code_hash
 
-  # Wait for all images to be pushed to ECR before booting EC2s
-  depends_on = [
-    docker_registry_image.backend,
-    docker_registry_image.frontend,
-    docker_registry_image.nginx
-  ]
+  # Instances only boot AFTER docker build+push completes (deploy script order),
+  # but we also wait for the ECR repos to exist so a fresh apply can't race.
+  depends_on = [module.ecr]
 }
 
 module "alb" {

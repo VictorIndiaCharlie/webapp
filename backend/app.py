@@ -190,8 +190,7 @@ def ensure_schema():
 
 
 def build_dictionaries():
-    global EXACT_MAP, INVENTED_MAP, ALL_KEYS_SORTED
-    global INVENTED_SET, IS_LOADED, INVENTOR
+    global ALL_KEYS_SORTED, ALL_KEY_SET, INVENTED_SET, IS_LOADED, INVENTOR
     print("[init] Loading 2M word dictionary into memory...")
     t0 = time.perf_counter()
 
@@ -267,7 +266,7 @@ def load_db_words():
 
 def add_word_to_engine(word: str, key: str):
     """Register a freshly added word in the in-memory engine (no restart needed)."""
-    global ALL_KEYS_SORTED, ALL_KEY_SET
+    global ALL_KEYS_SORTED
     w = word.lower()
     if w not in EXACT_MAP.get(key, []):
         EXACT_MAP[key].append(w)
