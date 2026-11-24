@@ -33,15 +33,35 @@ jobs:
           echo "STATE_BUCKET=anagram-tfstate-${ACCOUNT_ID}" >> $GITHUB_ENV
           echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com" >> $GITHUB_ENV
 
-      # --- NEW: Create Tarball and Upload to S3 ---
+      # The state bucket is the Terraform backend and is NOT created by Terraform.
+      # It must exist before `terraform init` on a fresh account.
+      # (Must live in eu-central-1 to match the backend region in providers.tf.)
+      - name: Ensure State Bucket Exists
+        run: |
+          aws s3api head-bucket --bucket "${STATE_BUCKET}" 2>/dev/null || \
+            aws s3api create-bucket --bucket "${STATE_BUCKET}" --region eu-central-1 \
+            --create-bucket-configuration LocationConstraint=eu-central-1
+
+      # --- TERRAFORM ---
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
+
+      # FIX: The artifacts bucket (module.artifact) and ECR repos (module.ecr) are
+      # created BY Terraform, so they must be provisioned before the S3 upload
+      # and docker push below. This mirrors terraform/deploy.sh.
+      # module.iam is pulled in automatically as a dependency of module.artifact.
+      - name: Terraform Pre-Apply (ECR + Artifact Bucket)
+        working-directory: ./terraform
+        run: terraform apply -auto-approve -target=module.ecr -target=module.artifact
+
+      # --- Create Tarball and Upload to S3 (bucket now exists) ---
       - name: Upload Configuration to S3
         run: |
-          # Note: This assumes the S3 bucket already exists via Terraform. 
-          # If it's a fresh deploy, you might need to run a partial `terraform apply` first.
           tar --exclude='.git' --exclude='node_modules' --exclude='terraform' -czf /tmp/anagram-app.tar.gz -C . .
           aws s3 cp /tmp/anagram-app.tar.gz s3://anagram-artifacts-$(aws sts get-caller-identity --query Account --output text)/anagram-app.tar.gz
 
-      # --- NEW: Build and Push to ECR ---
+      # --- Build and Push to ECR (repos now exist) ---
       - name: Build and Push Docker Images
         run: |
           aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
@@ -52,11 +72,6 @@ jobs:
           docker push ${{ env.ECR_REGISTRY }}/anagram-backend:latest
           docker push ${{ env.ECR_REGISTRY }}/anagram-frontend:latest
           docker push ${{ env.ECR_REGISTRY }}/anagram-nginx:latest
-
-      # --- TERRAFORM ---
-      - name: Terraform Init
-        working-directory: ./terraform
-        run: terraform init -backend-config="bucket=${{ env.STATE_BUCKET }}"
 
       - name: Terraform Apply
         working-directory: ./terraform
