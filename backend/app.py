@@ -19,7 +19,7 @@ from inventor import MarkovInventor
 
 # ---------------------------------------------------------------- config
 DB_CONFIG = {
-    "host": os.getenv("POSTGRES_HOST", "db"),
+    "host": os.getenv("POSTGRES_HOST", "db
     "port": int(os.getenv("POSTGRES_PORT", "5432")),
     "dbname": os.getenv("POSTGRES_DB", "anagrams"),
     "user": os.getenv("POSTGRES_USER", "anagram"),
