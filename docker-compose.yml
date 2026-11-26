@@ -34,7 +34,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      healthcheck:
+    healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 5s
       timeout: 5s
