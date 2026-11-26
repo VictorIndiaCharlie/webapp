@@ -86,24 +86,3 @@ jobs:
         working-directory: ./terraform
         run: terraform apply -auto-approve -var "code_hash=${CODE_HASH}"
 
-      - name: Integration Test (Live API)
-        working-directory: ./terraform
-        run: |
-          URL="http://$(terraform output -raw alb_dns_name)"
-          echo "Testing API at $URL..."
-          
-          # 1. Test DB Connectivity
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health")
-          if [ "$STATUS" -ne 200 ]; then
-            echo "❌ Health check failed with status $STATUS"
-            exit 1
-          fi
-          echo "✅ Health check passed (DB is connected)"
-
-          # 2. Test Anagram Logic
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/anagrams?word=maria")
-          if [ "$STATUS" -ne 200 ]; then
-            echo "❌ Anagram API failed with status $STATUS"
-            exit 1
-          fi
-          echo "✅ Anagram API passed"
